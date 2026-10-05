@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "articleDirectory": "_posts",
+  "imageDirectory": "assets/images/posts",
+  "imagePublicPath": "/assets/images/posts",
+  "filenameTemplate": "{date}-ios-{id}.md",
+  "articleExtensions": [
+    "md",
+    "markdown"
+  ],
+  "excludedArticleNames": [
+    "_index.md"
+  ],
+  "frontMatter": {
+    "format": "yaml",
+    "fields": {
+      "title": "title",
+      "description": "description",
+      "date": "date",
+      "tags": "tags"
+    },
+    "requireDescription": false,
+    "dateStyle": "jekyll",
+    "timeZone": "Asia/Tokyo",
+    "extra": {
+      "layout": "post"
+    }
+  },
+  "imageReferenceStyle": "absolute"
+}

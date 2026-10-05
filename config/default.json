@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "articleDirectory": "src/content/diary",
+  "imageDirectory": "public/images/diary",
+  "imagePublicPath": "/images/diary",
+  "filenameTemplate": "ios-{id}.md",
+  "articleExtensions": [
+    "md",
+    "markdown"
+  ],
+  "excludedArticleNames": [
+    "_index.md"
+  ],
+  "frontMatter": {
+    "format": "yaml",
+    "fields": {
+      "title": "title",
+      "description": "description",
+      "date": "date",
+      "tags": "tags"
+    },
+    "requireDescription": true,
+    "dateStyle": "date",
+    "timeZone": "Asia/Tokyo",
+    "extra": {}
+  },
+  "imageReferenceStyle": "site-relative"
+}

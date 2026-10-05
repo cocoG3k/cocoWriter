@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{title}} | {{siteTitle}}</title>
+  <style>
+    body { margin: 0; color: #202020; font: 16px/1.8 system-ui, sans-serif; }
+    header, main, footer { max-width: 48rem; margin: auto; padding: 1.5rem; }
+    .site { border-bottom: 1px solid #ddd; }
+    h1 { line-height: 1.4; } img { max-width: 100%; height: auto; }
+    pre { overflow: auto; padding: 1rem; background: #f4f4f4; }
+    .tags span { display: inline-block; margin-right: .5rem; }
+    time, footer { color: #666; }
+  </style>
+</head>
+<body>
+  <header class="site"><strong>{{siteTitle}}</strong><p>{{siteDescription}}</p></header>
+  <main>
+    <header><time datetime="{{dateISO8601}}">{{dateJapanese}}</time><h1>{{title}}</h1><p>{{description}}</p><div class="tags">{{tags}}</div></header>
+    <article>{{content}}</article>
+  </main>
+  <footer>端末内のプレビュー</footer>
+</body>
+</html>

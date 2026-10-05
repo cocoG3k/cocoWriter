@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "articleDirectory": "src/content/diary",
+  "imageDirectory": "public/images/blog/diary",
+  "imagePublicPath": "/images/blog/diary",
+  "filenameTemplate": "ios-{id}.md",
+  "articleExtensions": [
+    "md",
+    "markdown"
+  ],
+  "excludedArticleNames": [
+    "_index.md",
+    "_template.md"
+  ],
+  "frontMatter": {
+    "format": "yaml",
+    "fields": {
+      "title": "title",
+      "description": "description",
+      "date": "date",
+      "tags": "tags"
+    },
+    "requireDescription": false,
+    "dateStyle": "date",
+    "timeZone": "Asia/Tokyo",
+    "extra": {
+      "draft": false
+    }
+  },
+  "imageReferenceStyle": "site-relative",
+  "preview": {
+    "templateFile": "../preview-templates/sfuji-diary.html"
+  }
+}

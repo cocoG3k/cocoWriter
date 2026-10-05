@@ -1,0 +1,34 @@
+name: Validate cocoWriter
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  blog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: site-template
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site-template/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+  ios:
+    runs-on: macos-15
+    timeout-minutes: 25
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v6
+      - run: xcodebuild -version
+      - run: python3 tools/check-project.py
+      - run: python3 tools/test_build_profiles.py
+      - run: python3 tools/test-ios.py

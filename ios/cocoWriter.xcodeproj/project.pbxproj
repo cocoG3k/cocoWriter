@@ -1,0 +1,572 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A10000000000000000000001 /* cocoWriterApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* cocoWriterApp.swift */; };
+		A10000000000000000000002 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* Models.swift */; };
+		A10000000000000000000003 /* Store.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003 /* Store.swift */; };
+		A10000000000000000000004 /* GitHub.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000004 /* GitHub.swift */; };
+		A10000000000000000000005 /* MusicResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000005 /* MusicResolver.swift */; };
+		A10000000000000000000006 /* Views.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* Views.swift */; };
+		A10000000000000000000007 /* WriterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* WriterTests.swift */; };
+		A10000000000000000000008 /* MarkdownEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000B /* MarkdownEditor.swift */; };
+		A10000000000000000000009 /* BlogPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000C /* BlogPreview.swift */; };
+		A1000000000000000000000A /* BlogPreview.css in Resources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000D /* BlogPreview.css */; };
+		A1000000000000000000000B /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = AD0000000000000000000002 /* Markdown */; };
+		A1000000000000000000000C /* Portal.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000E /* Portal.swift */; };
+		A1000000000000000000000D /* PrivateNotes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000F /* PrivateNotes.swift */; };
+		A1000000000000000000000E /* DependencyInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000010 /* DependencyInfo.swift */; };
+		A1000000000000000000000F /* SBOM.cdx.json in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011 /* SBOM.cdx.json */; };
+		A10000000000000000000010 /* SwiftMarkdown-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000012 /* SwiftMarkdown-LICENSE.txt */; };
+		A10000000000000000000011 /* SwiftMarkdown-NOTICE.txt in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000013 /* SwiftMarkdown-NOTICE.txt */; };
+		A10000000000000000000012 /* SwiftCmark-COPYING.txt in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000014 /* SwiftCmark-COPYING.txt */; };
+		A10000000000000000000013 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000015 /* Assets.xcassets */; };
+		A10000000000000000000020 /* SharedMusic.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000020; };
+		A10000000000000000000021 /* MusicLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000021; };
+		A10000000000000000000022 /* MusicLibraryViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000022; };
+
+ B10000000000000000000001 = {isa = PBXBuildFile; fileRef = B20000000000000000000001; };
+ B10000000000000000000002 = {isa = PBXBuildFile; fileRef = A20000000000000000000020; };
+ B10000000000000000000003 = {isa = PBXBuildFile; fileRef = B20000000000000000000002; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+A10000000000000000000023 = {isa = PBXBuildFile; fileRef = A20000000000000000000023; };
+A10000000000000000000024 = {isa = PBXBuildFile; fileRef = A20000000000000000000024; };
+A10000000000000000000025 = {isa = PBXBuildFile; fileRef = A20000000000000000000025; };
+C10000000000000000000001 /* SiteConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000001; };
+C10000000000000000000002 /* BlogProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000002; };
+C10000000000000000000003 /* FrontMatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000003; };
+C10000000000000000000004 /* BlogProfile.json in Resources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000004; };
+C10000000000000000000005 /* BlogProfileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000005; };
+C10000000000000000000006 /* BlogPreviewTemplate.html in Resources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000006; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		A30000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A90000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A60000000000000000000001;
+			remoteInfo = cocoWriter;
+		};
+
+ B30000000000000000000001 = {isa = PBXContainerItemProxy; containerPortal = A90000000000000000000001; proxyType = 1; remoteGlobalIDString = B60000000000000000000001; remoteInfo = cocoWriterShare; };
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		A20000000000000000000001 /* cocoWriterApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = cocoWriterApp.swift; sourceTree = "<group>"; };
+		A20000000000000000000002 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		A20000000000000000000003 /* Store.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Store.swift; sourceTree = "<group>"; };
+		A20000000000000000000004 /* GitHub.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHub.swift; sourceTree = "<group>"; };
+		A20000000000000000000005 /* MusicResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicResolver.swift; sourceTree = "<group>"; };
+		A20000000000000000000006 /* Views.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views.swift; sourceTree = "<group>"; };
+		A20000000000000000000007 /* WriterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WriterTests.swift; sourceTree = "<group>"; };
+		A20000000000000000000008 /* cocoWriter.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = cocoWriter.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000000000000000000009 /* cocoWriterTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = cocoWriterTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A2000000000000000000000A /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		A2000000000000000000000B /* MarkdownEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownEditor.swift; sourceTree = "<group>"; };
+		A2000000000000000000000C /* BlogPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlogPreview.swift; sourceTree = "<group>"; };
+		A2000000000000000000000D /* BlogPreview.css */ = {isa = PBXFileReference; lastKnownFileType = text.css; path = BlogPreview.css; sourceTree = "<group>"; };
+		A2000000000000000000000E /* Portal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Portal.swift; sourceTree = "<group>"; };
+		A2000000000000000000000F /* PrivateNotes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivateNotes.swift; sourceTree = "<group>"; };
+		A20000000000000000000010 /* DependencyInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DependencyInfo.swift; sourceTree = "<group>"; };
+		A20000000000000000000011 /* SBOM.cdx.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = SBOM.cdx.json; sourceTree = "<group>"; };
+		A20000000000000000000012 /* SwiftMarkdown-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "SwiftMarkdown-LICENSE.txt"; sourceTree = "<group>"; };
+		A20000000000000000000013 /* SwiftMarkdown-NOTICE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "SwiftMarkdown-NOTICE.txt"; sourceTree = "<group>"; };
+		A20000000000000000000014 /* SwiftCmark-COPYING.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "SwiftCmark-COPYING.txt"; sourceTree = "<group>"; };
+		A20000000000000000000015 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A20000000000000000000020 /* SharedMusic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedMusic.swift; sourceTree = "<group>"; };
+		A20000000000000000000021 /* MusicLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicLibrary.swift; sourceTree = "<group>"; };
+		A20000000000000000000022 /* MusicLibraryViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicLibraryViews.swift; sourceTree = "<group>"; };
+
+ B20000000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+ B20000000000000000000002 = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; path = cocoWriterShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+ B20000000000000000000003 = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+ B20000000000000000000004 = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ShareExtension.entitlements; sourceTree = "<group>"; };
+A20000000000000000000023 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicLibraryTests.swift; sourceTree = "<group>"; };
+A20000000000000000000024 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArticleImages.swift; sourceTree = "<group>"; };
+A20000000000000000000025 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArticleImageTests.swift; sourceTree = "<group>"; };
+C20000000000000000000001 /* SiteConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SiteConfiguration.swift; sourceTree = "<group>"; };
+C20000000000000000000002 /* BlogProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlogProfile.swift; sourceTree = "<group>"; };
+C20000000000000000000003 /* FrontMatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrontMatter.swift; sourceTree = "<group>"; };
+C20000000000000000000004 /* BlogProfile.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = BlogProfile.json; sourceTree = "<group>"; };
+C20000000000000000000005 /* BlogProfileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlogProfileTests.swift; sourceTree = "<group>"; };
+C20000000000000000000006 /* BlogPreviewTemplate.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = BlogPreviewTemplate.html; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+ B40000000000000000000001 = {isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = ""; dstSubfolderSpec = 13; files = (B10000000000000000000003, ); name = "Embed App Extensions"; runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A40000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1000000000000000000000B /* Markdown in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A40000000000000000000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A50000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				A50000000000000000000002 /* cocoWriter */,
+				A50000000000000000000003 /* Tests */,
+                B50000000000000000000001 /* ShareExtension */,
+				A2000000000000000000000A /* README.md */,
+				A50000000000000000000004 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A50000000000000000000002 /* cocoWriter */ = {
+			isa = PBXGroup;
+			children = (
+                C20000000000000000000004 /* BlogProfile.json */,
+                C20000000000000000000006 /* BlogPreviewTemplate.html */,
+                C20000000000000000000003 /* FrontMatter.swift */,
+                C20000000000000000000002 /* BlogProfile.swift */,
+                C20000000000000000000001 /* SiteConfiguration.swift */,
+                A20000000000000000000024,
+				A20000000000000000000015 /* Assets.xcassets */,
+				A20000000000000000000001 /* cocoWriterApp.swift */,
+				A20000000000000000000022 /* MusicLibraryViews.swift */,
+				A20000000000000000000021 /* MusicLibrary.swift */,
+				A20000000000000000000020 /* SharedMusic.swift */,
+				A20000000000000000000002 /* Models.swift */,
+				A20000000000000000000003 /* Store.swift */,
+				A20000000000000000000004 /* GitHub.swift */,
+				A20000000000000000000005 /* MusicResolver.swift */,
+				A20000000000000000000006 /* Views.swift */,
+				A2000000000000000000000B /* MarkdownEditor.swift */,
+				A2000000000000000000000C /* BlogPreview.swift */,
+				A2000000000000000000000D /* BlogPreview.css */,
+				A2000000000000000000000E /* Portal.swift */,
+				A2000000000000000000000F /* PrivateNotes.swift */,
+				A20000000000000000000010 /* DependencyInfo.swift */,
+				A20000000000000000000011 /* SBOM.cdx.json */,
+				A20000000000000000000012 /* SwiftMarkdown-LICENSE.txt */,
+				A20000000000000000000013 /* SwiftMarkdown-NOTICE.txt */,
+				A20000000000000000000014 /* SwiftCmark-COPYING.txt */,
+			);
+			path = cocoWriter;
+			sourceTree = "<group>";
+		};
+		A50000000000000000000003 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+                C20000000000000000000005 /* BlogProfileTests.swift */,
+                A20000000000000000000025,
+				A20000000000000000000007 /* WriterTests.swift */,
+                A20000000000000000000023,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		A50000000000000000000004 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000008 /* cocoWriter.app */,
+				A20000000000000000000009 /* cocoWriterTests.xctest */,
+                B20000000000000000000002,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+
+ B50000000000000000000001 = {isa = PBXGroup; children = (B20000000000000000000001, B20000000000000000000003, B20000000000000000000004, ); path = ShareExtension; sourceTree = "<group>"; };
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A60000000000000000000001 /* cocoWriter */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AB0000000000000000000002 /* Build configuration list for PBXNativeTarget "cocoWriter" */;
+			buildPhases = (
+				A70000000000000000000001 /* Sources */,
+				A40000000000000000000001 /* Frameworks */,
+				A80000000000000000000001 /* Resources */,
+                B40000000000000000000001 /* Embed App Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+                BC0000000000000000000001,
+			);
+			name = cocoWriter;
+			packageProductDependencies = (
+				AD0000000000000000000002 /* Markdown */,
+			);
+			productName = cocoWriter;
+			productReference = A20000000000000000000008 /* cocoWriter.app */;
+			productType = "com.apple.product-type.application";
+		};
+		A60000000000000000000002 /* cocoWriterTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AB0000000000000000000003 /* Build configuration list for PBXNativeTarget "cocoWriterTests" */;
+			buildPhases = (
+				A70000000000000000000002 /* Sources */,
+				A40000000000000000000002 /* Frameworks */,
+				A80000000000000000000002 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				AC0000000000000000000001 /* PBXTargetDependency */,
+			);
+			name = cocoWriterTests;
+			productName = cocoWriterTests;
+			productReference = A20000000000000000000009 /* cocoWriterTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+
+ B60000000000000000000001 = {isa = PBXNativeTarget; buildConfigurationList = BB0000000000000000000001; buildPhases = (B70000000000000000000001, ); buildRules = (); dependencies = (); name = cocoWriterShare; productName = cocoWriterShare; productReference = B20000000000000000000002; productType = "com.apple.product-type.app-extension"; };
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A90000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					A60000000000000000000001 = {
+						CreatedOnToolsVersion = 15.0;
+					};
+					A60000000000000000000002 = {
+						CreatedOnToolsVersion = 15.0;
+						ProvisioningStyle = Automatic;
+						TestTargetID = A60000000000000000000001;
+					};
+				};
+			};
+			buildConfigurationList = AB0000000000000000000001 /* Build configuration list for PBXProject "cocoWriter" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = ja;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				ja,
+				en,
+				Base,
+			);
+			mainGroup = A50000000000000000000001;
+			packageReferences = (
+				AD0000000000000000000001 /* XCRemoteSwiftPackageReference "swift-markdown" */,
+			);
+			productRefGroup = A50000000000000000000004 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A60000000000000000000001 /* cocoWriter */,
+				A60000000000000000000002 /* cocoWriterTests */,
+                B60000000000000000000001,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A80000000000000000000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+                C10000000000000000000004 /* BlogProfile.json in Resources */,
+                C10000000000000000000006 /* BlogPreviewTemplate.html in Resources */,
+				A10000000000000000000013 /* Assets.xcassets in Resources */,
+				A1000000000000000000000A /* BlogPreview.css in Resources */,
+				A1000000000000000000000F /* SBOM.cdx.json in Resources */,
+				A10000000000000000000010 /* SwiftMarkdown-LICENSE.txt in Resources */,
+				A10000000000000000000011 /* SwiftMarkdown-NOTICE.txt in Resources */,
+				A10000000000000000000012 /* SwiftCmark-COPYING.txt in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A80000000000000000000002 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A70000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+                C10000000000000000000003 /* FrontMatter.swift in Sources */,
+                C10000000000000000000002 /* BlogProfile.swift in Sources */,
+                A10000000000000000000024,
+				A10000000000000000000001 /* cocoWriterApp.swift in Sources */,
+				A10000000000000000000022 /* MusicLibraryViews.swift in Sources */,
+				A10000000000000000000021 /* MusicLibrary.swift in Sources */,
+				A10000000000000000000020 /* SharedMusic.swift in Sources */,
+				A10000000000000000000002 /* Models.swift in Sources */,
+				A10000000000000000000003 /* Store.swift in Sources */,
+				A10000000000000000000004 /* GitHub.swift in Sources */,
+                C10000000000000000000001 /* SiteConfiguration.swift in Sources */,
+				A10000000000000000000005 /* MusicResolver.swift in Sources */,
+				A10000000000000000000006 /* Views.swift in Sources */,
+				A10000000000000000000008 /* MarkdownEditor.swift in Sources */,
+				A10000000000000000000009 /* BlogPreview.swift in Sources */,
+				A1000000000000000000000C /* Portal.swift in Sources */,
+				A1000000000000000000000D /* PrivateNotes.swift in Sources */,
+				A1000000000000000000000E /* DependencyInfo.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A70000000000000000000002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+                C10000000000000000000005 /* BlogProfileTests.swift in Sources */,
+                A10000000000000000000025,
+				A10000000000000000000007 /* WriterTests.swift in Sources */,
+                A10000000000000000000023,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+
+ B70000000000000000000001 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (B10000000000000000000001, B10000000000000000000002, ); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		AC0000000000000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A60000000000000000000001 /* cocoWriter */;
+			targetProxy = A30000000000000000000001 /* PBXContainerItemProxy */;
+		};
+
+ BC0000000000000000000001 = {isa = PBXTargetDependency; target = B60000000000000000000001; targetProxy = B30000000000000000000001; };
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		AA0000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		AA0000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		AA0000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+                CODE_SIGN_ENTITLEMENTS = cocoWriter/cocoWriter.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "cocoWriter";
+				INFOPLIST_KEY_LSRequiresIPhoneOS = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.2.0;
+				PRODUCT_BUNDLE_IDENTIFIER = org.example.cocoWriter;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		AA0000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+                CODE_SIGN_ENTITLEMENTS = cocoWriter/cocoWriter.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "cocoWriter";
+				INFOPLIST_KEY_LSRequiresIPhoneOS = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.2.0;
+				PRODUCT_BUNDLE_IDENTIFIER = org.example.cocoWriter;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		AA0000000000000000000005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = org.example.cocoWriterTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/cocoWriter.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/cocoWriter";
+			};
+			name = Debug;
+		};
+		AA0000000000000000000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = org.example.cocoWriterTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/cocoWriter.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/cocoWriter";
+			};
+			name = Release;
+		};
+
+ BA0000000000000000000001 = {isa = XCBuildConfiguration; buildSettings = {
+ APPLICATION_EXTENSION_API_ONLY = YES;
+ CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
+ CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = "";
+ CURRENT_PROJECT_VERSION = 2; MARKETING_VERSION = 0.2.0;
+ GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = ShareExtension/Info.plist;
+ PRODUCT_BUNDLE_IDENTIFIER = org.example.cocoWriter.Share;
+ PRODUCT_NAME = "$(TARGET_NAME)"; SKIP_INSTALL = YES;
+ SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = 1;
+ LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
+ }; name = Debug; };
+
+ BA0000000000000000000002 = {isa = XCBuildConfiguration; buildSettings = {
+ APPLICATION_EXTENSION_API_ONLY = YES;
+ CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
+ CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = "";
+ CURRENT_PROJECT_VERSION = 2; MARKETING_VERSION = 0.2.0;
+ GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = ShareExtension/Info.plist;
+ PRODUCT_BUNDLE_IDENTIFIER = org.example.cocoWriter.Share;
+ PRODUCT_NAME = "$(TARGET_NAME)"; SKIP_INSTALL = YES;
+ SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = 1;
+ LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
+ }; name = Release; };
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		AB0000000000000000000001 /* Build configuration list for PBXProject "cocoWriter" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA0000000000000000000001 /* Debug */,
+				AA0000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AB0000000000000000000002 /* Build configuration list for PBXNativeTarget "cocoWriter" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA0000000000000000000003 /* Debug */,
+				AA0000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AB0000000000000000000003 /* Build configuration list for PBXNativeTarget "cocoWriterTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA0000000000000000000005 /* Debug */,
+				AA0000000000000000000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+
+ BB0000000000000000000001 = {isa = XCConfigurationList; buildConfigurations = (BA0000000000000000000001, BA0000000000000000000002, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		AD0000000000000000000001 /* XCRemoteSwiftPackageReference "swift-markdown" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/swiftlang/swift-markdown.git";
+			requirement = {
+				kind = exactVersion;
+				version = 0.8.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		AD0000000000000000000002 /* Markdown */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AD0000000000000000000001 /* XCRemoteSwiftPackageReference "swift-markdown" */;
+			productName = Markdown;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = A90000000000000000000001 /* Project object */;
+}

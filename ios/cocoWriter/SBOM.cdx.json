@@ -1,0 +1,120 @@
+{
+  "$schema": "https://cyclonedx.org/schema/bom-1.6.schema.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "serialNumber": "urn:uuid:c7c531e4-e659-4468-8ba6-94360530533a",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-10-05T00:00:00Z",
+    "component": {
+      "type": "application",
+      "bom-ref": "org.example.cocoWriter",
+      "name": "cocoWriter",
+      "version": "0.2.0"
+    },
+    "properties": [
+      {
+        "name": "cocowriter:package-resolved-sha256",
+        "value": "0bb97679ca7eeac5eab7703e1552f1c3db7dc8a72a5d4e692bfd855a200e6074"
+      },
+      {
+        "name": "cocowriter:scope",
+        "value": "SwiftPM libraries resolved and linked into this Xcode app. Apple system frameworks are platform dependencies, listed separately in Settings."
+      },
+      {
+        "name": "cocowriter:excluded-development-dependencies",
+        "value": "swift-docc-plugin and Swift Argument Parser are mentioned in upstream development manifests/notices but are not resolved or linked into this app build."
+      },
+      {
+        "name": "cocowriter:swift-cmark-test-assets",
+        "value": "COPYING also includes CC-BY-SA-4.0 for the CommonMark spec and notices for test tools; those source test assets are not bundled into the app."
+      }
+    ]
+  },
+  "components": [
+    {
+      "type": "library",
+      "bom-ref": "swift-cmark",
+      "name": "swift-cmark",
+      "version": "0.9.0",
+      "scope": "required",
+      "purl": "pkg:swift/github.com/swiftlang/swift-cmark@0.9.0",
+      "licenses": [
+        {
+          "expression": "BSD-2-Clause AND MIT"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/swiftlang/swift-cmark/tree/08ddb528923cc1a6527e02b7a1aee9e516ca749a"
+        }
+      ],
+      "properties": [
+        {
+          "name": "cocowriter:git-revision",
+          "value": "08ddb528923cc1a6527e02b7a1aee9e516ca749a"
+        },
+        {
+          "name": "cocowriter:dependency",
+          "value": "transitive"
+        },
+        {
+          "name": "cocowriter:license-resource",
+          "value": "SwiftCmark-COPYING.txt"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "swift-markdown",
+      "name": "swift-markdown",
+      "version": "0.8.0",
+      "scope": "required",
+      "purl": "pkg:swift/github.com/swiftlang/swift-markdown@0.8.0",
+      "licenses": [
+        {
+          "expression": "Apache-2.0 WITH Swift-exception"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/swiftlang/swift-markdown/tree/3c6f9523da3a1ec2fd829673e472d95b8097a3b8"
+        }
+      ],
+      "properties": [
+        {
+          "name": "cocowriter:git-revision",
+          "value": "3c6f9523da3a1ec2fd829673e472d95b8097a3b8"
+        },
+        {
+          "name": "cocowriter:dependency",
+          "value": "direct"
+        },
+        {
+          "name": "cocowriter:license-resource",
+          "value": "SwiftMarkdown-LICENSE.txt"
+        }
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "org.example.cocoWriter",
+      "dependsOn": [
+        "swift-markdown"
+      ]
+    },
+    {
+      "ref": "swift-markdown",
+      "dependsOn": [
+        "swift-cmark"
+      ]
+    },
+    {
+      "ref": "swift-cmark",
+      "dependsOn": []
+    }
+  ]
+}

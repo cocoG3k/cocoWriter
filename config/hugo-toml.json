@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "articleDirectory": "content/posts",
+  "imageDirectory": "static/images/posts",
+  "imagePublicPath": "/images/posts",
+  "filenameTemplate": "ios-{id}.md",
+  "articleExtensions": [
+    "md",
+    "markdown"
+  ],
+  "excludedArticleNames": [
+    "_index.md"
+  ],
+  "frontMatter": {
+    "format": "toml",
+    "fields": {
+      "title": "title",
+      "description": "description",
+      "date": "date",
+      "tags": "tags"
+    },
+    "requireDescription": false,
+    "dateStyle": "iso8601",
+    "timeZone": "Asia/Tokyo",
+    "extra": {
+      "draft": false
+    }
+  },
+  "imageReferenceStyle": "absolute"
+}
