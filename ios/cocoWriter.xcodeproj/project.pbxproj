@@ -396,7 +396,7 @@ C20000000000000000000006 /* BlogPreviewTemplate.html */ = {isa = PBXFileReferenc
                 CODE_SIGN_ENTITLEMENTS = cocoWriter/cocoWriter.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "cocoWriter";
@@ -409,7 +409,7 @@ C20000000000000000000006 /* BlogPreviewTemplate.html */ = {isa = PBXFileReferenc
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.2.0;
+				MARKETING_VERSION = 0.2.1;
 				PRODUCT_BUNDLE_IDENTIFIER = org.example.cocoWriter;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -427,7 +427,7 @@ C20000000000000000000006 /* BlogPreviewTemplate.html */ = {isa = PBXFileReferenc
                 CODE_SIGN_ENTITLEMENTS = cocoWriter/cocoWriter.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "cocoWriter";
@@ -440,7 +440,7 @@ C20000000000000000000006 /* BlogPreviewTemplate.html */ = {isa = PBXFileReferenc
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.2.0;
+				MARKETING_VERSION = 0.2.1;
 				PRODUCT_BUNDLE_IDENTIFIER = org.example.cocoWriter;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -496,7 +496,7 @@ C20000000000000000000006 /* BlogPreviewTemplate.html */ = {isa = PBXFileReferenc
  APPLICATION_EXTENSION_API_ONLY = YES;
  CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
  CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = "";
- CURRENT_PROJECT_VERSION = 2; MARKETING_VERSION = 0.2.0;
+ CURRENT_PROJECT_VERSION = 3; MARKETING_VERSION = 0.2.1;
  GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = ShareExtension/Info.plist;
  PRODUCT_BUNDLE_IDENTIFIER = org.example.cocoWriter.Share;
  PRODUCT_NAME = "$(TARGET_NAME)"; SKIP_INSTALL = YES;
@@ -508,7 +508,7 @@ C20000000000000000000006 /* BlogPreviewTemplate.html */ = {isa = PBXFileReferenc
  APPLICATION_EXTENSION_API_ONLY = YES;
  CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
  CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = "";
- CURRENT_PROJECT_VERSION = 2; MARKETING_VERSION = 0.2.0;
+ CURRENT_PROJECT_VERSION = 3; MARKETING_VERSION = 0.2.1;
  GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = ShareExtension/Info.plist;
  PRODUCT_BUNDLE_IDENTIFIER = org.example.cocoWriter.Share;
  PRODUCT_NAME = "$(TARGET_NAME)"; SKIP_INSTALL = YES;

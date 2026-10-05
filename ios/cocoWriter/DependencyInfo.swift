@@ -1,13 +1,5 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
-struct SBOMDocument: FileDocument {
-    static var readableContentTypes: [UTType] { [.json] }
-    var data: Data
-    init(data: Data) { self.data = data }
-    init(configuration: ReadConfiguration) throws { data = configuration.file.regularFileContents ?? Data() }
-    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: data) }
-}
 struct DependencyInventory: Decodable {
     let specVersion: String
     let components: [Component]
@@ -33,23 +25,18 @@ struct DependencyInventory: Decodable {
     }
 }
 struct DependencyInfoView: View {
-    @State private var exporting = false
-    @State private var message: String?
     var body: some View {
         List {
             Group {
                 if let inventory = DependencyInventory.bundled {
                     Section {
-                        Text("このビルドが使うライブラリとライセンスです。SBOMはCycloneDX \(inventory.specVersion)形式で書き出せます。").font(.caption).foregroundStyle(WriterPalette.secondary)
-                        Button("SBOM（JSON）を書き出す", systemImage: "square.and.arrow.up") { exporting = true }.accessibilityIdentifier("export-sbom")
+                        Text("このアプリで使用しているライブラリのライセンスです。").font(.caption).foregroundStyle(WriterPalette.secondary)
                     }
                     ForEach(inventory.components) { component in
                         Section {
                             VStack(alignment: .leading, spacing: 5) {
                                 HStack { Text(component.name).font(.subheadline.bold()); Spacer(); Text(component.version).font(.caption.monospaced()) }
-                                Text(component.role).font(.caption).foregroundStyle(WriterPalette.secondary)
                                 Text(component.licenses.map(\.expression).joined(separator: " / ")).font(.caption).textSelection(.enabled)
-                                Text("commit: \(component.revision)").font(.caption2.monospaced()).foregroundStyle(WriterPalette.secondary).textSelection(.enabled)
                             }.padding(.vertical, 3)
                             NavigationLink("ライセンス全文") { ResourceTextView(title: component.name, text: DependencyInventory.resource(component.licenseFile)) }
                                 .accessibilityIdentifier("dependency-license-" + component.name)
@@ -57,15 +44,9 @@ struct DependencyInfoView: View {
                             if let source = component.externalReferences.first { Link("ソースを確認", destination: source.url) }
                         }
                     }
-                } else { Text("SBOMを読み込めませんでした。").foregroundStyle(.red) }
-                Section("Appleの標準フレームワーク") {
-                    Text("SwiftUI · UIKit · WebKit · Foundation · Combine · Security · CryptoKit · UniformTypeIdentifiers").font(.caption)
-                    Text("iOSに付属する機能を使用します。外部Swiftパッケージとは別に管理しています。").font(.caption2).foregroundStyle(WriterPalette.secondary)
-                }
+                } else { Text("ライセンス情報を読み込めませんでした。").foregroundStyle(.red) }
             }.listRowBackground(WriterPalette.surface)
-        }.writerCanvas().writerChrome().navigationTitle("依存ライブラリ・SBOM").navigationBarTitleDisplayMode(.inline)
-            .fileExporter(isPresented: $exporting, document: SBOMDocument(data: DependencyInventory.data ?? Data()), contentType: .json, defaultFilename: "cocoWriter-SBOM.cdx.json") { result in if case .failure(let error) = result { message = error.localizedDescription } }
-            .alert("書き出し", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) { Button("OK") { message = nil } } message: { Text(message ?? "") }
+        }.writerCanvas().writerChrome().navigationTitle("ライセンス").navigationBarTitleDisplayMode(.inline)
     }
 }
 private struct ResourceTextView: View {

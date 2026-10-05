@@ -521,8 +521,8 @@ struct MarkdownFile: FileDocument {
                         }
                     }
                     Section("アプリ情報") {
-                        NavigationLink { DependencyInfoView() } label: { Label("依存ライブラリ・SBOM", systemImage: "shippingbox") }
-                        Text("バージョン \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.2.0")").font(.caption).foregroundStyle(WriterPalette.secondary)
+                        NavigationLink { DependencyInfoView() } label: { Label("ライセンス", systemImage: "doc.text") }
+                        Text("バージョン \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.2.1")").font(.caption).foregroundStyle(WriterPalette.secondary)
                     }
                     Section("写真の保存容量") {
                         Button("投稿済み写真の端末コピーを整理") {

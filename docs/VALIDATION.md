@@ -1,6 +1,8 @@
 # 検証記録
 
-2026-10-05、cocoWriter 0.2.0 / Build 2。
+2026-10-05、cocoWriter 0.2.1 / Build 3。
+
+0.2.1では設定画面のSBOM表示・JSON書き出しを削除し、ライセンス全文の確認だけを残した。更新後もXcode 27 / iOS 27 SimulatorのXCTest **113件すべて成功、失敗0件**、設定ツール6件とブログ9件のテスト・ビルドが成功。初回公開の0.2.0は、GitHub ActionsのXcode 26.3でも113件のXCTestとブログの検証が成功した。
 
 同日の追加検証: 公開先テーマを指定するプレビューと既存画像・HTML改行の表示を実装し、標準設定のXCTestは**113件成功**、設定選択ツールは**6件成功**。sfuji.orgの実際の保存形式、Astroビルド、DeviceHubでのテーマ付きプレビューを確認した。詳細は [sfuji.orgへの適応検証](SFUJI_VALIDATION.md) を参照。
 

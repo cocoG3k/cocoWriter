@@ -10,7 +10,7 @@
       "type": "application",
       "bom-ref": "org.example.cocoWriter",
       "name": "cocoWriter",
-      "version": "0.2.0"
+      "version": "0.2.1"
     },
     "properties": [
       {
