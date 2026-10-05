@@ -9,6 +9,63 @@ final class BlogProfileTests: XCTestCase {
         draft.body = "本文\n"
         return draft
     }
+    func testExtraHeadersPreserveOriginalValuesAndRoundTripEdits() throws {
+        for format in [BlogProfile.Format.yaml, .toml, .json] {
+            var profile = BlogProfile.standard
+            profile.frontMatter.format = format
+            profile.frontMatter.extra = ["draft": .bool(true), "layout": .string("post"), "weight": .number(3), "aliases": .strings(["/old/"])]
+            let original = draft(profile)
+            var changedDefaults = profile
+            changedDefaults.frontMatter.extra["draft"] = .bool(false)
+            var imported = try RepositoryArticleMarkdown.decode(path: original.path, sha: "old", markdown: original.markdown, profile: changedDefaults)
+            XCTAssertEqual(imported.extraHeaderFields["draft"], .bool(true))
+            XCTAssertEqual(imported.markdown, original.markdown)
+            try imported.setExtraHeader("draft", value: .bool(false))
+            try imported.setExtraHeader("layout", value: .string("page"))
+            try imported.setExtraHeader("weight", value: .number(7))
+            try imported.setExtraHeader("aliases", value: .strings(["/new/", "/other/"]))
+            XCTAssertTrue(imported.hasUnpublishedEdits)
+            let saved = try JSONDecoder().decode(Draft.self, from: JSONEncoder().encode(imported))
+            XCTAssertEqual(saved.markdown, imported.markdown)
+            let reloaded = try RepositoryArticleMarkdown.decode(path: saved.path, sha: "new", markdown: saved.markdown, profile: changedDefaults)
+            XCTAssertEqual(reloaded.extraHeaderFields["draft"], .bool(false))
+            XCTAssertEqual(reloaded.extraHeaderFields["layout"], .string("page"))
+            XCTAssertEqual(reloaded.extraHeaderFields["weight"], .number(7))
+            XCTAssertEqual(reloaded.extraHeaderFields["aliases"], .strings(["/new/", "/other/"]))
+            XCTAssertEqual(reloaded.path, original.path)
+            XCTAssertEqual(reloaded.body, saved.body)
+        }
+    }
+    func testAdditionalHeaderEditsKeepUnknownMetadataAndOldDraftsReadable() throws {
+        var profile = BlogProfile.standard
+        profile.frontMatter.requireDescription = false
+        profile.frontMatter.extra = ["draft": .bool(false), "layout": .string("post")]
+        let markdown = "---\r\ntitle: 'Title'\r\ndate: '2026-01-22'\r\ndraft: true # keep until edited\r\ncustom: 'original'\r\nnested:\r\n  value: true\r\n---\r\nBody\r\n"
+        var imported = try RepositoryArticleMarkdown.decode(path: "src/content/diary/post.md", sha: "old", markdown: markdown, profile: profile)
+        XCTAssertEqual(imported.markdown, markdown)
+        XCTAssertEqual(imported.extraHeaderFields["custom"], .string("original"))
+        XCTAssertNil(imported.extraHeaderFields["nested"])
+        try imported.setExtraHeader("custom", value: .string("edited"))
+        XCTAssertTrue(imported.markdown.contains("draft: true # keep until edited\r\n"))
+        XCTAssertTrue(imported.markdown.contains("nested:\r\n  value: true\r\n"))
+        XCTAssertFalse(imported.markdown.contains("layout:"))
+        try imported.setExtraHeader("layout", value: .string("page"))
+        XCTAssertTrue(imported.markdown.contains("layout: \"page\"\r\n"))
+        XCTAssertThrowsError(try imported.setExtraHeader("title", value: .string("wrong")))
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(imported)) as? [String: Any])
+        object.removeValue(forKey: "extraHeaderEdits")
+        let legacy = try JSONDecoder().decode(Draft.self, from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertNil(legacy.extraHeaderEdits)
+        XCTAssertEqual(legacy.markdown, markdown)
+    }
+    func testNewArticleExtraHeaderOverridesDoNotChangeCategoryDefaults() throws {
+        var profile = BlogProfile.standard
+        profile.frontMatter.extra = ["draft": .bool(true)]
+        var article = draft(profile)
+        try article.setExtraHeader("draft", value: .bool(false))
+        XCTAssertEqual(article.profile.frontMatter.extra["draft"], .bool(true))
+        XCTAssertTrue(article.markdown.contains("draft: false"))
+    }
     func testBundledProfileIsValidatedAndMatchesDefault() throws {
         XCTAssertNil(BlogProfile.configurationError)
         XCTAssertEqual(BlogProfile.current, .standard)

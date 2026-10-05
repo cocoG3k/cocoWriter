@@ -172,6 +172,42 @@ enum RepositoryArticleMarkdown {
     static func tagValues(_ text: String) -> [String] {
         text.components(separatedBy: CharacterSet(charactersIn: ",、\n")).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
     }
+    // Expose supported root values without interpreting or rewriting unknown metadata.
+    static func extraFields(_ markdown: String, profile: BlogProfile) -> [String: BlogProfile.Value] {
+        guard let parsed = try? parts(markdown) else { return [:] }
+        let fields = profile.frontMatter.fields
+        let reserved = Set([fields.title, fields.date] + [fields.description, fields.tags].compactMap { $0 })
+        let keys: [String]
+        if let object = parsed.object { keys = Array(object.keys) }
+        else {
+            var lines = parsed.header.components(separatedBy: parsed.newline)
+            if parsed.format == .toml, let table = lines.firstIndex(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("[") }) {
+                lines = Array(lines[..<table])
+            }
+            let pattern = parsed.format == .toml ? #"^[A-Za-z_][A-Za-z0-9_-]*(?=\s*=)"# : #"^[A-Za-z_][A-Za-z0-9_-]*(?=:)"#
+            keys = lines.compactMap { line in
+                line.range(of: pattern, options: .regularExpression).map { String(line[$0]) }
+            }
+        }
+        var result: [String: BlogProfile.Value] = [:]
+        for key in keys where !reserved.contains(key) && key.range(of: #"^[A-Za-z_][A-Za-z0-9_-]*$"#, options: .regularExpression) != nil {
+            if let object = parsed.object {
+                guard let raw = object[key], let bytes = try? JSONSerialization.data(withJSONObject: raw, options: .fragmentsAllowed),
+                      let value = try? JSONDecoder().decode(BlogProfile.Value.self, from: bytes) else { continue }
+                result[key] = value
+            } else if let (raw, following) = try? rawValue(key, parts: parsed) {
+                let text = withoutComment(raw)
+                if text == "true" || text == "false" { result[key] = .bool(text == "true") }
+                else if let number = Double(text), number.isFinite, abs(number) <= 9007199254740991 { result[key] = .number(number) }
+                else if text.hasPrefix("[") || text.isEmpty && following.contains(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("- ") }) {
+                    if let list = try? tags(key, parts: parsed) { result[key] = .strings(list) }
+                } else if text != "null" && text != "~", let value = try? value(key, parts: parsed) {
+                    result[key] = .string(value)
+                }
+            }
+        }
+        return result
+    }
     private static func values(_ draft: Draft) -> [(String, BlogProfile.Value)] {
         let profile = draft.profile, fields = profile.frontMatter.fields
         var result: [(String, BlogProfile.Value)] = [(fields.title, .string(draft.title))]
@@ -186,7 +222,7 @@ enum RepositoryArticleMarkdown {
     }
     static func newHeader(_ draft: Draft) -> String {
         let profile = draft.profile
-        let fields = values(draft) + profile.frontMatter.extra.sorted { $0.key < $1.key }.map { ($0.key, $0.value) }
+        let fields = values(draft) + draft.extraHeaderFields.sorted { $0.key < $1.key }.map { ($0.key, $0.value) }
         if profile.frontMatter.format == .json {
             return "{\n" + fields.map { "  " + Draft.yaml($0.0) + ": " + $0.1.literal }.joined(separator: ",\n") + "\n}\n"
         }
@@ -202,8 +238,10 @@ enum RepositoryArticleMarkdown {
             draft.date != source.date ? fields.date : nil,
             draft.tags != source.tags ? fields.tags : nil
         ].compactMap { $0 })
-        if changed.isEmpty { return parsed.prefix + draft.body }
-        let updates = values(draft).filter { changed.contains($0.0) }
+        let originals = extraFields(source.markdown, profile: draft.profile)
+        let extras = (draft.extraHeaderEdits ?? [:]).filter { originals[$0.key] != $0.value }.sorted { $0.key < $1.key }
+        if changed.isEmpty && extras.isEmpty { return parsed.prefix + draft.body }
+        let updates = values(draft).filter { changed.contains($0.0) } + extras.map { ($0.key, $0.value) }
         if var object = parsed.object {
             for (key, value) in updates { object[key] = try? JSONSerialization.jsonObject(with: Data(value.literal.utf8), options: .fragmentsAllowed) }
             guard let bytes = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]), let header = String(data: bytes, encoding: .utf8) else { return source.markdown }

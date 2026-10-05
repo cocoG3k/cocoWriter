@@ -15,6 +15,7 @@ struct MarkdownFile: FileDocument {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @State var draft: Draft
+    @State private var editingHeader: ArticleFixedField?
     @State private var choosingMusic = false
     @State private var preview = false
     @State private var expandedBody = false
@@ -77,6 +78,19 @@ struct MarkdownFile: FileDocument {
                                 }
                             } label: { Label("タグ候補から選ぶ", systemImage: "tag") }
                                 .accessibilityIdentifier("article-select-tags")
+                        }
+                    }
+                    if !draft.extraHeaderFields.isEmpty {
+                        Section {
+                            ForEach(draft.extraHeaderFields.keys.sorted(), id: \.self) { key in
+                                if let value = draft.extraHeaderFields[key] {
+                                    Button { editingHeader = ArticleFixedField(key: key, value: value) } label: {
+                                        HStack { Text(key); Spacer(); Text(value.literal).foregroundStyle(WriterPalette.secondary); Image(systemName: "chevron.right") }
+                                    }.accessibilityIdentifier("article-header-" + key)
+                                }
+                            }
+                        } header: { Text("追加のヘッダー項目") } footer: {
+                            Text("この記事の値を編集します。draft が true の記事は、サイト側で下書きとして扱われます。カテゴリの初期値は変更しません。")
                         }
                     }
                     Section("本文 · Markdown") {
@@ -157,6 +171,12 @@ struct MarkdownFile: FileDocument {
         .interactiveDismissDisabled(publishing || importingImage || store.storageError != nil)
         .onChange(of: draft) { _, value in _ = store.update(value) }
         .onChange(of: scenePhase) { _, phase in if phase != .active { _ = store.update(draft) } }
+        .sheet(item: $editingHeader) { field in
+            ArticleFixedFieldEditor(field: field, articleValue: true) { key, value in
+                guard !publishing, !draft.hasPendingOperation else { throw WriterError.message("送信中・確認待ちの記事は編集できません。") }
+                try draft.setExtraHeader(key, value: value)
+            } onDelete: { }
+        }
         .sheet(isPresented: $photos) {
             ArticlePhotoPicker(started: { importingImage = true; photos = false }, completion: { result in
                 photos = false
@@ -938,9 +958,11 @@ private struct ArticleFixedField: Identifiable {
     @State private var flag: Bool
     @State private var message: String?
     private let existing: Bool
+    private let articleValue: Bool
     let onSave: (String, BlogProfile.Value) throws -> Void
     let onDelete: () -> Void
-    init(field: ArticleFixedField, onSave: @escaping (String, BlogProfile.Value) throws -> Void, onDelete: @escaping () -> Void) {
+    init(field: ArticleFixedField, articleValue: Bool = false, onSave: @escaping (String, BlogProfile.Value) throws -> Void, onDelete: @escaping () -> Void) {
+        self.articleValue = articleValue
         _key = State(initialValue: field.key); existing = field.originalKey != nil
         var initialType: ValueType = .text, initialText = "", initialFlag = false
         switch field.value {
@@ -956,14 +978,14 @@ private struct ArticleFixedField: Identifiable {
         NavigationStack {
             Form {
                 Section {
-                    TextField("項目名（例: draft）", text: $key).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    TextField("項目名（例: draft）", text: $key).textInputAutocapitalization(.never).autocorrectionDisabled().disabled(articleValue)
                     Picker("値の種類", selection: $type) { ForEach(ValueType.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
                     if type == .flag { Toggle("値（オン = true）", isOn: $flag) }
                     else { TextField(type == .list ? "一行に一つずつ入力" : "値", text: $text, axis: .vertical).autocorrectionDisabled() }
                 }
-                if existing { Section { Button("この固定項目を削除", role: .destructive) { onDelete(); dismiss() } } }
+                if existing && !articleValue { Section { Button("この固定項目を削除", role: .destructive) { onDelete(); dismiss() } } }
                 if let message { Section { Text(message).foregroundStyle(.red) } }
-            }.writerCanvas().writerChrome().navigationTitle("固定項目").navigationBarTitleDisplayMode(.inline)
+            }.writerCanvas().writerChrome().navigationTitle(articleValue ? "ヘッダーの値" : "固定項目").navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) { Button("キャンセル") { dismiss() } }
                     ToolbarItem(placement: .confirmationAction) { Button("完了") { save() } }

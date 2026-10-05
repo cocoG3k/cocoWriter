@@ -69,6 +69,24 @@ struct Draft: Codable, Identifiable, Equatable {
     var pendingDeletionSHA: String?
     var repositoryPath: String?
     var repositorySource: RepositorySource?
+    // Optional so older saved articles remain decodable. Only explicit edits are stored.
+    var extraHeaderEdits: [String: BlogProfile.Value]?
+    var extraHeaderFields: [String: BlogProfile.Value] {
+        var values = profile.frontMatter.extra
+        if let source = repositorySource {
+            values.merge(RepositoryArticleMarkdown.extraFields(source.markdown, profile: profile)) { _, original in original }
+        }
+        values.merge(extraHeaderEdits ?? [:]) { _, edited in edited }
+        return values
+    }
+    mutating func setExtraHeader(_ key: String, value: BlogProfile.Value) throws {
+        var validationProfile = profile
+        validationProfile.frontMatter.extra[key] = value
+        try validationProfile.validate()
+        var edits = extraHeaderEdits ?? [:]
+        edits[key] = value
+        extraHeaderEdits = edits
+    }
     var remoteChanged: Bool?
     var pinnedAt: Date?
     var deletedAt: Date?
