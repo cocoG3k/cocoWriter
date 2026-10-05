@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="340" viewBox="0 0 1200 340" role="img" aria-labelledby="title description">
+  <title id="title">cocoWriter — Your words, your own space.</title>
+  <desc id="description">A teal and coral illustration of a draft, a preview and a published page.</desc>
+  <defs>
+    <linearGradient id="background" x2="1" y2="1">
+      <stop stop-color="#edf8f6"/>
+      <stop offset="1" stop-color="#fff7f0"/>
+    </linearGradient>
+    <linearGradient id="paper" x2="1" y2="1">
+      <stop stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#fbfdfc"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="340" rx="24" fill="url(#background)"/>
+  <circle cx="1108" cy="54" r="174" fill="#d2efeb" opacity=".58"/>
+  <circle cx="763" cy="339" r="142" fill="#ffe2d9" opacity=".72"/>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <text x="64" y="78" font-size="13" font-weight="700" letter-spacing="3" fill="#00858b">A JOURNAL THAT BELONGS TO YOU</text>
+    <text x="60" y="153" font-size="59" font-weight="750" letter-spacing="-2" fill="#183f40">Your words,</text>
+    <text x="60" y="219" font-size="59" font-weight="750" letter-spacing="-2" fill="#183f40">your own space.</text>
+    <text x="64" y="273" font-size="18" fill="#4a7270">From your iPhone to your GitHub Pages.</text>
+    <g transform="translate(752 47) rotate(-9 92 118)">
+      <rect x="5" y="7" width="182" height="236" rx="16" fill="#b2dcd5" opacity=".45"/>
+      <rect width="182" height="236" rx="16" fill="url(#paper)" stroke="#cbe3dd"/>
+      <text x="23" y="39" font-size="11" font-weight="700" letter-spacing="2" fill="#7b9691">DRAFT</text>
+      <rect x="23" y="62" width="96" height="9" rx="4" fill="#79b6ad"/>
+      <rect x="23" y="88" width="131" height="5" rx="2" fill="#d0e3df"/>
+      <rect x="23" y="102" width="123" height="5" rx="2" fill="#d0e3df"/>
+      <rect x="23" y="116" width="105" height="5" rx="2" fill="#d0e3df"/>
+      <rect x="23" y="143" width="135" height="65" rx="8" fill="#edf6f3"/>
+    </g>
+    <g transform="translate(849 69) rotate(8 101 119)">
+      <rect x="6" y="8" width="203" height="238" rx="16" fill="#88c5be" opacity=".25"/>
+      <rect width="203" height="238" rx="16" fill="url(#paper)" stroke="#cbe3dd"/>
+      <text x="23" y="38" font-size="11" font-weight="700" letter-spacing="2" fill="#00858b">PREVIEW</text>
+      <rect x="23" y="55" width="157" height="73" rx="8" fill="#d7efea"/>
+      <path d="M23 112 71 75 112 109 147 85 180 111v17H23Z" fill="#8ec6bb"/>
+      <circle cx="151" cy="75" r="9" fill="#f77b63"/>
+      <rect x="23" y="150" width="128" height="8" rx="4" fill="#547f78"/>
+      <rect x="23" y="173" width="153" height="5" rx="2" fill="#d0e3df"/>
+      <rect x="23" y="187" width="134" height="5" rx="2" fill="#d0e3df"/>
+      <rect x="23" y="201" width="146" height="5" rx="2" fill="#d0e3df"/>
+    </g>
+    <g transform="translate(981 229)">
+      <rect x="2" y="4" width="150" height="43" rx="21" fill="#235453" opacity=".10"/>
+      <rect width="150" height="43" rx="21" fill="#00858b"/>
+      <path d="m20 22 5 5 10-11" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="47" y="27" font-size="12" font-weight="700" letter-spacing="1" fill="#fff">PUBLISHED</text>
+    </g>
+  </g>
+</svg>

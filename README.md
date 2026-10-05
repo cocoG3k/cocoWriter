@@ -1,27 +1,60 @@
-# cocoWriter
+<p align="center">
+  <img src="ios/cocoWriter/Assets.xcassets/AppIcon.appiconset/AppIcon.png" width="112" alt="cocoWriterのアイコン：青緑のCと珊瑚色のペン先">
+</p>
 
-**自分のGitHub Pagesへ記事と写真を投稿する、iPhone用のオープンソース執筆アプリ。**
+<h1 align="center">cocoWriter</h1>
 
-An open-source iPhone Markdown writer for your own GitHub Pages blog. Includes a standalone blog template. [English guide](docs/README.en.md)
+<p align="center"><strong>日々の記録を、iPhoneから自分のGitHub Pagesへ。</strong></p>
+<p align="center">Markdownで書いて、サイトの見た目で確かめて、写真と一緒に公開する。<br>自分のブログのための、オープンソースの執筆アプリです。</p>
 
-[![Validate cocoWriter](https://github.com/cocoG3k/cocoWriter/actions/workflows/ci.yml/badge.svg)](https://github.com/cocoG3k/cocoWriter/actions/workflows/ci.yml)
+<p align="center">
+  <a href="https://github.com/cocoG3k/cocoWriter/actions/workflows/ci.yml"><img src="https://github.com/cocoG3k/cocoWriter/actions/workflows/ci.yml/badge.svg" alt="ビルドとテスト"></a>
+  <img src="https://img.shields.io/badge/iOS-17%2B-00858b" alt="iOS 17以降">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-f47763" alt="MIT License"></a>
+</p>
 
-CocoG Writerを元にした独立プロジェクトです。元のプロジェクト・実機アプリ・保存データを変更せず、別のアプリ識別子と保存領域を使います。特定のドメインやGitHubアカウントには接続しません。
+<p align="center">
+  <a href="#最短の導入手順">はじめる</a> ·
+  <a href="docs/content-format.md">サイトに合わせる</a> ·
+  <a href="docs/README.en.md">English</a>
+</p>
+
+![Your words, your own space. — iPhoneから自分のGitHub Pagesへ](docs/images/hero.svg)
+
+## 書くところから、公開するところまで
+
+| 下書きをまとめる | Markdownで書く | サイトの見た目で確認する |
+| :---: | :---: | :---: |
+| <img src="docs/images/articles.png" width="240" alt="サンプルの下書きを一覧で管理する記事画面"> | <img src="docs/images/editor.png" width="240" alt="タイトル・日付・タグとMarkdown本文を編集する画面"> | <img src="docs/images/preview.png" width="240" alt="ブログのテーマで記事を表示するプレビュー画面"> |
+| 日記も曲紹介も、ひとつの場所に。 | 文章も写真も、自分のペースで。 | 公開前に、読み手の画面を確かめる。 |
+
+<sub>検証用iPhone Simulatorの画面です。記事はREADME用のサンプルで、GitHubへは投稿していません。</sub>
 
 ## できること
 
-- 日記・記事の下書き、Markdown編集、プレビュー、書き出し
-- 公開先の記事ページのHTML・CSSをビルド時に指定するテーマ付きプレビュー（sfuji.orgの設定例を同梱）
-- 写真を位置情報・撮影情報を除いたJPEGへ変換し、記事と一緒に1コミットで投稿
-- Spotifyの曲・アルバム紹介、曲のストック、YouTube Music共有拡張
-- 自分用メモ・日記を端末内に保存
-- 投稿済み記事の読み込み、編集、公開解除。競合時は端末の編集を保護
-- GitHubユーザー名／組織名・リポジトリ・ブランチ・公開URL・プレビューのサイト名を設定
-- ビルド時に記事・画像の保存先、画像公開パス、YAML／TOML／JSONのFront Matterと項目名を設定
+| 機能 | 内容 |
+| --- | --- |
+| **文章を書く** | 日記・記事の下書き、Markdown編集、プレビュー、書き出し。 |
+| **写真を添える** | 位置情報・撮影情報を除いたJPEGに変換し、記事と写真を1コミットで投稿。 |
+| **自分のサイトに合わせる** | 保存先、画像の公開パス、Front Matter、項目名をビルド時に設定。HTML・CSSによるテーマ付きプレビューにも対応。 |
+| **公開済みの記事を扱う** | GitHubから記事を読み込み、編集・公開解除。競合時は端末の編集中の内容を保護。 |
+| **好きな音楽を残す** | Spotifyの曲・アルバム紹介、曲のストック、YouTube Music共有拡張。 |
+| **自分だけのメモを書く** | 公開せず、端末内に保存するメモ・日記。 |
 
-ユーザーサイト `https://username.github.io/`、プロジェクトサイト `https://username.github.io/my-journal/`、独自ドメインに対応します。
+### 自分のGitHub Pagesに合わせて
 
-アプリ本体はiOSネイティブです。GitHub Pagesに公開するのはブログです。任意のGitHub Pagesサイトへ無条件で投稿できるわけではなく、[記事形式](docs/content-format.md)に対応するサイトが必要です。Jekyllの `_posts/`、Hugoの `content/posts/` などは、[ビルド設定](docs/content-format.md)で書き出し形式を合わせられます。
+ユーザーサイト、プロジェクトサイト、独自ドメインに対応。公開先のリポジトリ・ブランチ・URLはアプリの設定画面から選べます。
+
+| ブログの構成 | 記事の保存先の例 | 設定例 |
+| --- | --- | --- |
+| 同梱のブログテンプレート | `src/content/diary/` | [default.json](config/default.json) |
+| Jekyll | `_posts/` | [jekyll.json](config/jekyll.json) |
+| Hugo | `content/posts/` | [YAML](config/hugo-yaml.json) · [TOML](config/hugo-toml.json) · [JSON](config/hugo-json.json) |
+| 既存サイトのテーマ付きプレビュー | サイトに合わせて指定 | [sfuji.orgでの検証](docs/SFUJI_VALIDATION.md) |
+
+アプリはiOSネイティブで、GitHub Pagesに公開するのはブログです。既存サイトには、[対応する記事形式](docs/content-format.md)に合わせたビルド設定が必要です。
+
+**必要なもの：Mac、Swift 6.2以降を含むXcode、iOS 17以降。** ソースからビルドして使います。App Storeでの配信はありません。同梱のブログテンプレートにはNode.js 22以降を使います。
 
 ## 最短の導入手順
 
@@ -31,8 +64,6 @@ CocoG Writerを元にした独立プロジェクトです。元のプロジェ�
 git clone https://github.com/cocoG3k/cocoWriter.git
 cd cocoWriter
 ```
-
-Macでソースからビルドして利用します。App Storeでの配信はありません。
 
 ### 1. ブログを用意する
 
@@ -49,7 +80,7 @@ GitHubの Settings → Pages → Build and deployment → Source を **GitHub Ac
 
 ### 2. iPhoneアプリをビルドする
 
-必要なものはMac、Swift 6.2以降を含むXcode、iOS 17以降です。Swift Markdown 0.8.0を初回ビルド時に取得します。
+Swift Markdown 0.8.0を初回ビルド時に取得します。
 
 ```sh
 cd ../cocoWriter
@@ -91,11 +122,16 @@ GitHubで対象リポジトリだけを選んだFine-grained personal access tok
 
 ## 保存と公開先の変更
 
+<details>
+<summary>端末内のデータ・バックアップ・別のブログへの切り替えについて</summary>
+
 記事・自分用メモ・曲ストックは端末内に保存されます。自分用メモをGitHubへ送る機能はありません。クラウド同期はなく、アプリを削除すると端末内データも失われるため、必要な記事は書き出して保管してください。
 
 公開先を変えると保存済みトークンを削除します。投稿済み・送信結果の確認待ち・GitHub由来の記事や画像の復元履歴がある間と、GitHubへの通信中は投稿先の変更を停止します。サイト名・公開URLは変更できます。別の投稿先へ移る場合は記事を書き出し、確認待ちを解決し、接続済みの記事を**端末のゴミ箱から完全削除**してから変更してください。端末からの整理と「公開解除」は別の操作です。
 
 既存のCocoG Writerの保存データ・認証情報は自動移行しません。
+
+</details>
 
 ## 開発・確認
 
@@ -125,6 +161,8 @@ tools/                  ブログ作成・識別子設定・ビルド確認
 docs/                   記事形式・英語ガイド・検証記録
 .github/workflows/      公開プロジェクトのCI
 ```
+
+CocoG Writerを元にした独立プロジェクトです。元のアプリとは別のアプリ識別子・保存領域を使い、特定のドメインやGitHubアカウントには固定されていません。アイコンはCocoG Writerと共通です。
 
 プロジェクトのコードと同梱する独自の素材は[MIT License](LICENSE)です。Swift Markdown、cmark、ブログのnpmパッケージはそれぞれのライセンスが適用されます。[第三者ライセンス](THIRD_PARTY_NOTICES.md)と同梱する原文の通知を保持してください。生成したブログ記事や利用者の写真の権利を、このライセンスへ変更するものではありません。
 

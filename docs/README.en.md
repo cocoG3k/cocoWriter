@@ -1,6 +1,24 @@
-# cocoWriter
+<p align="center">
+  <img src="../ios/cocoWriter/Assets.xcassets/AppIcon.appiconset/AppIcon.png" width="112" alt="cocoWriter icon: a teal C and a coral pen nib">
+</p>
 
-cocoWriter is a native iPhone app for writing Markdown articles, adding photos, collecting music links, and publishing to your own GitHub Pages blog. It is an independent version of CocoG Writer. It uses a separate bundle identifier and local storage.
+<h1 align="center">cocoWriter</h1>
+
+<p align="center"><strong>Your words, your own GitHub Pages.</strong><br>A native iPhone Markdown writer for your personal blog.</p>
+
+![Your words, your own space.](images/hero.svg)
+
+<p align="center"><a href="../README.md">日本語</a> · <a href="content-format.md">Configuration guide</a></p>
+
+cocoWriter is a native iPhone app for writing Markdown articles, adding photos, collecting music links, and publishing to your own GitHub Pages blog. It is an independent version of CocoG Writer. It uses a separate bundle identifier and local storage, and shares the original CocoG Writer icon.
+
+## Write, preview, publish
+
+| Keep your drafts together | Write in Markdown | Preview your blog |
+| :---: | :---: | :---: |
+| <img src="images/articles.png" width="240" alt="Sample articles in the draft library"> | <img src="images/editor.png" width="240" alt="Article details and Markdown editor"> | <img src="images/preview.png" width="240" alt="An article preview using the blog theme"> |
+
+<sub>iPhone Simulator screenshots with sample content. The articles have not been published.</sub>
 
 ## Get started
 
