@@ -4,14 +4,52 @@ import CryptoKit
 enum PostKind: String, Codable, CaseIterable, Identifiable {
     case diary, music
     var id: String { rawValue }
-    var label: String { self == .diary ? "日記" : "曲紹介" }
+    var label: String { self == .diary ? "記事" : "曲紹介" }
     var symbol: String { self == .diary ? "square.and.pencil" : "music.note" }
 }
 struct Draft: Codable, Identifiable, Equatable {
     var id = UUID()
     var kind: PostKind
     var blogProfile: BlogProfile? = .current
+    // Runtime categories retain both their paths and the build format they extend.
+    // Optional fields keep existing drafts readable without rewriting them.
+    var categoryBaseProfile: BlogProfile?
+    var categoryName: String?
+    var articleSettingsVersion: Int?
     var profile: BlogProfile { blogProfile ?? .standard }
+    var supportsCurrentProfile: Bool {
+        if let version = articleSettingsVersion { return version == 1 && (try? profile.validate()) != nil }
+        return profile == .current || (categoryBaseProfile == .current && profile.hasSameFormat(as: .current))
+    }
+    var publicationProfile: BlogProfile { supportsCurrentProfile ? profile : .current }
+    var containsMusic: Bool { kind == .music || !music.isEmpty || body.contains("open.spotify.com/embed/") }
+    var canChangeCategory: Bool {
+        supportsCurrentProfile && remoteDestination == nil && remoteSHA == nil && repositoryPath == nil && !hasPendingOperation && imageCommitSHA == nil && commitURL == nil
+    }
+    mutating func selectCategory(_ category: ArticleCategory, configuration: SiteConfiguration) throws {
+        guard canChangeCategory else { throw WriterError.message("公開済み・確認待ちの記事のカテゴリは変更できません。複製して下書きにしてください。") }
+        try category.profile.validate()
+        guard category.isEnabled else { throw WriterError.message("設定で有効なカテゴリを選んでください。") }
+        guard repositorySource == nil || profile.frontMatter == category.profile.frontMatter else {
+            throw WriterError.message("読み込んだ記事のヘッダーは元の形式を保ちます。異なる記事形式を使う場合は、新しい記事を作成してください。")
+        }
+        var next = self
+        // Photos use the same local bytes; only this unpublished draft's paths change.
+        next.images = try attachedImages.map { image in
+            let path = category.profile.imagePath(id: id, hash: image.hash)
+            guard let reference = category.profile.imageReference(for: path, configuration: configuration) else {
+                throw WriterError.message("カテゴリの写真保存先を確認してください。")
+            }
+            next.body = next.body.replacingOccurrences(of: image.publicPath, with: reference)
+            next.music = next.music.map { item in
+                var copy = item; copy.comment = copy.comment.replacingOccurrences(of: image.publicPath, with: reference); return copy
+            }
+            return ArticleImage(hash: image.hash, repositoryPath: path, width: image.width, height: image.height, byteCount: image.byteCount, publishedPath: reference)
+        }
+        next.blogProfile = category.profile; next.categoryBaseProfile = .current; next.categoryName = category.name
+        next.articleSettingsVersion = 1
+        self = next
+    }
     var title = ""
     var description = ""
     var date = Date()
@@ -49,24 +87,23 @@ struct Draft: Codable, Identifiable, Equatable {
     var hasUnpublishedEdits: Bool { (repositorySource?.markdown ?? publishedMarkdown).map { markdown != $0 } ?? false }
     var validation: String? {
         if let error = BlogProfile.configurationError { return error }
-        if profile != BlogProfile.current { return "この記事は以前のビルド設定で作成されています。元の設定で書き出し・公開してください。" }
+        if !supportsCurrentProfile { return "この記事は以前のビルド設定で作成されています。元の設定で書き出し・公開してください。" }
         if title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "タイトルを入力してください。" }
         if profile.frontMatter.requireDescription && description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "説明文を入力してください。" }
-        if kind == .music && repositorySource == nil {
-            if music.isEmpty { return "曲かアルバムを追加してください。" }
+        if !music.isEmpty {
             for item in music {
                 if item.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "各曲・アルバムのタイトルを入力してください。" }
                 if SpotifyLink(item.spotifyURL) == nil { return "Spotify の曲・アルバムの共有 URL を入力してください。" }
                 if !item.confirmed { return "各 Spotify リンクの曲・バージョンを確認してください。" }
-                if !item.youtubeURL.isEmpty && MusicLink.youtube(item.youtubeURL) == nil { return "YouTube Music の有効な曲・アルバム URL を入力してください。" }
+                // The optional source URL is provenance only. Manual Spotify confirmation can complete an unavailable source.
             }
         }
         return nil
     }
     var markdown: String {
-        if let source = repositorySource { return RepositoryArticleMarkdown.render(self, source: source) }
-        var text = RepositoryArticleMarkdown.newHeader(self) + "\n" + body + "\n"
-        if kind == .music {
+        var text = repositorySource.map { RepositoryArticleMarkdown.render(self, source: $0) }
+            ?? (RepositoryArticleMarkdown.newHeader(self) + "\n" + body + "\n")
+        if !music.isEmpty {
             for item in music {
                 let heading = [item.artist, item.title].filter { !$0.isEmpty }.joined(separator: " - ")
                 text += "\n### \(Self.heading(heading))\n\n"
@@ -102,8 +139,8 @@ enum ArticleShelf: String, CaseIterable, Identifiable {
 enum ArticleFilter: String, CaseIterable, Identifiable {
     case all, diary, music
     var id: String { rawValue }
-    var label: String { switch self { case .all: return "全て"; case .diary: return "日記"; case .music: return "曲紹介" } }
-    func includes(_ draft: Draft) -> Bool { self == .all || (self == .diary ? draft.kind == .diary : draft.kind == .music) }
+    var label: String { switch self { case .all: return "全て"; case .diary: return "文章"; case .music: return "曲あり" } }
+    func includes(_ draft: Draft) -> Bool { self == .all || (self == .diary ? !draft.containsMusic : draft.containsMusic) }
 }
 enum ArticleLibrary {
     static func items(_ drafts: [Draft], shelf: ArticleShelf, filter: ArticleFilter = .all, publishedSort: PublishedArticleSort = .newest) -> [Draft] {

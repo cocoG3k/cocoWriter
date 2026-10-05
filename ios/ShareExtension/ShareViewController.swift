@@ -34,8 +34,11 @@ import UniformTypeIdentifiers
                 if let error { Text(error).foregroundStyle(.red) }
                 if !saved {
                     Section("保存する曲") {
-                        TextField("YouTube Musicの曲・アルバムURL", text: $item.youtubeURL).textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
-                        TextField("曲・アルバム名（後から入力できます）", text: $item.title)
+                        TextField("音楽サービスの曲の共有URL", text: $item.youtubeURL).textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                        Text("YouTube Music・Apple Music・Amazon Musicに対応。曲情報とSpotify候補は保存後にアプリで取得します。").font(.caption)
+                        if let issue = SharedMusicLink.parse(item.youtubeURL)?.issue { Text(issue).font(.caption).foregroundStyle(.red) }
+                        else if !item.youtubeURL.isEmpty, SharedMusicLink.parse(item.youtubeURL) == nil { Text("対応する音楽サービスの曲の共有URLを入力してください。").font(.caption).foregroundStyle(.red) }
+                        TextField("曲名（後から入力できます）", text: $item.title)
                         TextField("アーティスト（任意）", text: $item.artist)
                         TextField("この音についての紹介文", text: $item.comment, axis: .vertical).lineLimit(4...8)
                     }
@@ -53,7 +56,7 @@ import UniformTypeIdentifiers
                     }
                     Section {
                         Button(createArticle ? "曲と記事の下書きを保存" : "曲を保存") { save() }
-                            .disabled(loading || SharedMusicLink.youtube(item.youtubeURL) == nil)
+                            .disabled(loading || SharedMusicLink.parse(item.youtubeURL) == nil)
                     } footer: { Text("保存後にcocoWriterを開くと取り込まれます。Spotifyの選択や記事の続きはアプリで編集できます。") }
                 } else {
                     Section {
@@ -68,7 +71,8 @@ import UniformTypeIdentifiers
         }
     }
     private func save() {
-        guard let url = SharedMusicLink.youtube(item.youtubeURL) else { return }
+        guard let source = SharedMusicLink.parse(item.youtubeURL) else { return }
+        let url = source.url
         guard let directory = MusicShareInbox.directory() else {
             error = "共有用の保存先を開けません。アプリと共有拡張のApp Groups設定を確認してください。"; return
         }
@@ -94,6 +98,6 @@ import UniformTypeIdentifiers
             }
             if let text = input.attributedContentText?.string, let url = SharedMusicLink.extract(text) { item.youtubeURL = url.absoluteString; return }
         }
-        error = "YouTube Musicの共有URLを読み取れませんでした。曲の共有URLを入力してください。"
+        error = "共有URLを読み取れませんでした。YouTube Music・Apple Music・Amazon Musicの曲の共有URLを入力してください。手入力で保存する場合も、共有元URLを入力してください。"
     }
 }

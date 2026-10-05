@@ -1,6 +1,6 @@
 import Foundation
 
-/// Immutable per build; drafts retain their profile across app updates.
+/// Bundled defaults and saved per-category article settings. Drafts keep a snapshot.
 struct BlogProfile: Codable, Equatable {
     enum Format: String, Codable { case yaml, toml, json }
     enum DateStyle: String, Codable { case date, iso8601, jekyll }
@@ -54,6 +54,13 @@ struct BlogProfile: Codable, Equatable {
     var excludedArticleNames = ["_index.md"]
     var frontMatter = FrontMatter()
     static let standard = BlogProfile()
+    func hasSameFormat(as base: BlogProfile) -> Bool {
+        var value = self
+        value.articleDirectory = base.articleDirectory
+        value.imageDirectory = base.imageDirectory
+        value.imagePublicPath = base.imagePublicPath
+        return value == base
+    }
     private static let loaded: Result<BlogProfile, Error> = Result {
         guard let url = Bundle.main.url(forResource: "BlogProfile", withExtension: "json") else {
             throw WriterError.message("ビルド設定 BlogProfile.json が含まれていません。")

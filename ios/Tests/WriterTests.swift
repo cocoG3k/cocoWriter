@@ -453,6 +453,142 @@ final class WriterTests: XCTestCase {
         XCTAssertTrue(preview.contains("&lt;秘密&gt;&amp;&quot;"))
         XCTAssertTrue(preview.contains("下書きプレビュー · 未公開"))
     }
+    func testMusicSourcesNormalizeSongIDsAndRegions() throws {
+        let apple = try XCTUnwrap(SharedMusicLink.parse("https://music.apple.com/jp/album/曲名/1053933969?i=1053934844&l=en&at=tracker"))
+        XCTAssertEqual(apple.service, .apple); XCTAssertEqual(apple.trackID, "1053934844"); XCTAssertEqual(apple.country, "jp")
+        XCTAssertEqual(apple.url.absoluteString, "https://music.apple.com/jp/song/1053934844")
+        XCTAssertEqual(SharedMusicLink.parse("https://music.apple.com/gb/song/hymn/1053934844?ls=1")?.trackID, "1053934844")
+        for host in SharedMusicLink.amazonHosts {
+            let link = try XCTUnwrap(SharedMusicLink.parse("https://\(host)/albums/B084KP4NBH/?trackAsin=B084KPC3Q7&do=play&ref=dm_sh"))
+            XCTAssertEqual(link.service, .amazon); XCTAssertEqual(link.trackID, "B084KPC3Q7")
+            XCTAssertEqual(link.url.absoluteString, "https://\(host)/tracks/B084KPC3Q7")
+        }
+        XCTAssertEqual(SharedMusicLink.parse("https://youtu.be/YykjpeuMNEk?si=tracking")?.url.absoluteString, "https://music.youtube.com/watch?v=YykjpeuMNEk")
+        XCTAssertEqual(SharedMusicLink.parse("https://www.youtube.com/watch?v=YykjpeuMNEk&list=ignored")?.trackID, "YykjpeuMNEk")
+        for url in ["https://apple.co/30NF6YA", "https://amzn.to/3v5N2DO", "https://a.co/d/9G0RkjN"] { XCTAssertTrue(try XCTUnwrap(SharedMusicLink.parse(url)).isShort) }
+        XCTAssertEqual(SharedMusicLink.extract("好きな曲\nhttps://music.apple.com/us/album/hymn/1053933969?i=1053934844")?.absoluteString, "https://music.apple.com/us/song/1053934844")
+        XCTAssertEqual(SharedMusicLink.extract("Selfless https://music.amazon.co.jp/albums/B084KP4NBH?trackAsin=B084KPC3Q7&ref=dm_sh")?.path, "/tracks/B084KPC3Q7")
+    }
+    func testAmbiguousAndUnsafeMusicSourcesAreRejected() {
+        for raw in ["http://music.apple.com/us/song/123", "https://music.apple.com.evil.example/us/song/123", "https://user@music.amazon.com/tracks/B084KPC3Q7", "https://music.amazon.com:443/tracks/B084KPC3Q7", "https://music.amazon.evil.example/tracks/B084KPC3Q7", "https://music.amazon.com/tracks/short", "https://music.apple.com/us/album/name/123?i=1&i=2", "https://music.apple.com/us/album/name/123?i=oops", "https://music.amazon.com/albums/B084KP4NBH?trackAsin=B084KPC3Q7&trackAsin=B084KPC3Q7", "https://music.youtube.com/watch?v=abcdefghijk&v=lmnopqrstuv", "https://music.apple.com/us/song/0", "https://apple.co/", "https://a.co/../../secret", "https://music.apple.com/us/song/123?i=456", "https://music.amazon.com/tracks/B084KPC3Q7?trackAsin=B084KP4NBH"] {
+            XCTAssertNil(SharedMusicLink.parse(raw), raw)
+        }
+        for raw in ["https://music.apple.com/us/album/a-head-full-of-dreams/1053933969", "https://music.apple.com/jp/playlist/name/pl.123", "https://music.amazon.com/albums/B084KP4NBH", "https://music.amazon.com/playlists/B084KP4NBH", "https://music.youtube.com/playlist?list=OLAK5uy_example"] {
+            XCTAssertNotNil(SharedMusicLink.parse(raw)?.issue, raw)
+        }
+    }
+    func testAppleLookupUsesExactSongAndPreservesVersions() throws {
+        let data = Data(#"{"results":[{"kind":"album","trackId":1053934844,"trackName":"Wrong","artistName":"Wrong"},{"kind":"song","trackId":123,"trackName":"Wrong","artistName":"Wrong"},{"kind":"song","trackId":1053934844,"trackName":"Selfless (Live)","artistName":"The Strokes","trackTimeMillis":222000}]}"#.utf8)
+        XCTAssertEqual(try MusicPageParser.appleLookup(data, trackID: "1053934844"), MusicMetadata(title: "Selfless (Live)", artist: "The Strokes", duration: 222000))
+        XCTAssertThrowsError(try MusicPageParser.appleLookup(data, trackID: "999"))
+        XCTAssertThrowsError(try MusicPageParser.appleLookup(Data(#"{"results":[]}"#.utf8), trackID: "1053934844"))
+    }
+    func testPublicSongRequiresRecordingIdentityAndArtist() throws {
+        let source = try XCTUnwrap(SharedMusicLink.parse("https://music.apple.com/us/song/1053934844"))
+        let html = #"<script id=schema:song type="application/ld+json">{"@type":"MusicComposition","audio":{"@type":"MusicRecording","url":"https://music.apple.com/us/song/hymn/1053934844","name":"Hymn & Weekend","byArtist":[{"name":"Coldplay"}]}}</script>"#
+        XCTAssertEqual(try MusicPageParser.publicSong(html, source: source).artist, "Coldplay")
+        XCTAssertThrowsError(try MusicPageParser.publicSong(html.replacingOccurrences(of: "1053934844", with: "123"), source: source))
+        XCTAssertThrowsError(try MusicPageParser.publicSong(html.replacingOccurrences(of: "MusicRecording", with: "MusicAlbum"), source: source))
+        XCTAssertThrowsError(try MusicPageParser.publicSong("<html>Sign in</html>", source: source))
+        let amazon = try XCTUnwrap(SharedMusicLink.parse("https://music.amazon.com/tracks/B084KPC3Q7"))
+        let amazonHTML = #"<script type='application/ld+json'>{"@graph":[{"@type":"MusicRecording","url":"https://music.amazon.com/tracks/B084KPC3Q7","name":"Selfless","byArtist":{"name":"The Strokes"}}]}</script>"#
+        XCTAssertEqual(try MusicPageParser.publicSong(amazonHTML, source: amazon).title, "Selfless")
+    }
+    func testSonglinkRejectsDifferentProviderIDAndAlbum() throws {
+        let source = try XCTUnwrap(SharedMusicLink.parse("https://music.amazon.com/tracks/B084KPC3Q7"))
+        let html = MultiServiceMusicFixture.songlink(provider: "amazon", id: "B084KPC3Q7")
+        XCTAssertEqual(try MusicPageParser.songlink(html, source: source).1.count, 1)
+        for wrong in [html.replacingOccurrences(of: "amazon", with: "itunes"), html.replacingOccurrences(of: "B084KPC3Q7", with: "B084KP4NBH"), html.replacingOccurrences(of: "\"type\":\"song\"", with: "\"type\":\"album\"")] {
+            XCTAssertThrowsError(try MusicPageParser.songlink(wrong, source: source))
+        }
+    }
+    func testNewSourcesReuseMappedSpotifyCandidates() async throws {
+        for raw in ["https://music.apple.com/us/album/title/1053933969?i=1053934844", "https://music.amazon.co.jp/albums/B084KP4NBH?trackAsin=B084KPC3Q7"] {
+            let result = try await multiServiceResolver().resolve(URL(string: raw)!)
+            XCTAssertEqual(result.metadata.title, "Selfless")
+            XCTAssertEqual(result.candidates.count, 1); XCTAssertEqual(result.candidates.first?.artist, "The Strokes")
+            XCTAssertNil(result.notice)
+        }
+    }
+    func testAppleFallbackRejectsSonglinkAlbumAndUsesRegionalLookup() async throws {
+        let result = try await multiServiceResolver().resolve(URL(string: "https://music.apple.com/jp/song/222")!)
+        XCTAssertEqual(result.metadata.title, "Lookup JP"); XCTAssertEqual(result.metadata.artist, "Artist")
+        XCTAssertTrue(result.candidates.isEmpty); XCTAssertNotNil(result.notice)
+        let other = try await multiServiceResolver().resolve(URL(string: "https://music.apple.com/us/song/222")!)
+        XCTAssertEqual(other.metadata.title, "Lookup US")
+    }
+    func testApplePublicPageFallbackAndAmazonMetadataFallback() async throws {
+        let apple = try await multiServiceResolver().resolve(URL(string: "https://music.apple.com/us/song/333")!)
+        XCTAssertEqual(apple.metadata.title, "Public Song")
+        let amazon = try await multiServiceResolver().resolve(URL(string: "https://music.amazon.com/tracks/B000PUBLIC")!)
+        XCTAssertEqual(amazon.metadata.artist, "Public Artist")
+    }
+    func testShortURLExpansionAndFinalDestinationValidation() async throws {
+        let result = try await multiServiceResolver().resolve(URL(string: "https://apple.co/good123")!)
+        XCTAssertEqual(result.metadata.title, "Selfless")
+        for raw in ["https://apple.co/bad123", "https://amzn.to/album123", "https://apple.co/cross123"] {
+            do { _ = try await multiServiceResolver().resolve(URL(string: raw)!); XCTFail(raw) }
+            catch { XCTAssertTrue(error.localizedDescription.contains("手入力"), error.localizedDescription) }
+        }
+        // A final response URL cannot substitute another track after a redirect.
+        do { _ = try await multiServiceResolver().resolve(URL(string: "https://music.amazon.com/tracks/B000REDIR1")!); XCTFail() }
+        catch { XCTAssertTrue(error.localizedDescription.contains("Spotify")) }
+    }
+    func testRedirectPolicyBlocksUnsafeHopsAndBoundsRedirects() throws {
+        for raw in ["http://music.apple.com/us/song/123", "https://music.apple.com.evil.example/us/song/123", "https://user@music.apple.com/us/song/123", "https://music.apple.com:443/us/song/123", "https://open.spotify.com/track/0123456789ABCDEFGHIJKL", "https://music.apple.com/us/artist/name/123"] {
+            XCTAssertFalse(MusicRedirectPolicy.allows(URL(string: raw)!, sharing: .apple))
+        }
+        let original = URL(string: "https://apple.co/good123")!
+        let destination = URL(string: "https://music.apple.com/us/song/1053934844")!
+        XCTAssertTrue(MusicRedirectPolicy.allows(destination, sharing: .apple))
+        XCTAssertFalse(MusicRedirectPolicy.preservesIdentity(from: destination, to: URL(string: "https://music.apple.com/us/song/222")!))
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        let task = session.dataTask(with: original)
+        let policy = MusicRedirectPolicy(sharing: .apple)
+        let response = HTTPURLResponse(url: original, statusCode: 302, httpVersion: nil, headerFields: nil)!
+        for index in 1...6 {
+            var accepted = false
+            policy.urlSession(session, task: task, willPerformHTTPRedirection: response, newRequest: URLRequest(url: destination)) { accepted = $0 != nil }
+            XCTAssertEqual(accepted, index <= 5)
+        }
+    }
+    func testUnavailableMetadataExplainsManualContinuation() async throws {
+        for raw in ["https://music.amazon.com/tracks/B000FAILED", "https://music.apple.com/us/song/444", "https://music.youtube.com/watch?v=FAILFAILFAI", "https://music.amazon.com/albums/B084KP4NBH"] {
+            do { _ = try await multiServiceResolver().resolve(URL(string: raw)!); XCTFail(raw) }
+            catch { XCTAssertTrue(error.localizedDescription.contains("手入力")); XCTAssertTrue(error.localizedDescription.contains("Spotify") || error.localizedDescription.contains("曲情報")) }
+        }
+    }
+    func testCacheKeepsServiceRegionAndRefreshSeparate() async throws {
+        let resolver = multiServiceResolver()
+        let jp = URL(string: "https://music.apple.com/jp/song/222")!, us = URL(string: "https://music.apple.com/us/song/222")!
+        let japan = try await resolver.resolve(jp), america = try await resolver.resolve(us)
+        XCTAssertNotEqual(japan.metadata.title, america.metadata.title)
+        let refreshed = try await resolver.refresh(jp)
+        XCTAssertEqual(refreshed.metadata, japan.metadata)
+        // Numeric video IDs and Apple IDs may collide; provider is part of the cache key.
+        let apple = try await resolver.resolve(URL(string: "https://music.apple.com/us/song/10539348440")!)
+        let youtube = try await resolver.resolve(URL(string: "https://music.youtube.com/watch?v=10539348440")!)
+        XCTAssertEqual(apple.metadata.title, "Apple Song"); XCTAssertEqual(youtube.metadata.title, "YouTube Song")
+    }
+    func testLegacyMusicJSONAndManualCompletionRemainCompatible() throws {
+        let legacy = Data(#"{"id":"00000000-0000-0000-0000-000000000001","title":"Old Song","artist":"Artist","comment":"Memo","youtubeURL":"https://music.youtube.com/playlist?list=OLAK5uy_example","spotifyURL":"https://open.spotify.com/track/0123456789ABCDEFGHIJKL","confirmed":true}"#.utf8)
+        let item = try JSONDecoder().decode(MusicItem.self, from: legacy)
+        XCTAssertEqual(item.title, "Old Song"); XCTAssertNil(item.sourceID)
+        XCTAssertEqual(try JSONDecoder().decode(MusicItem.self, from: JSONEncoder().encode(item)), item)
+        var draft = Draft(kind: .music); draft.title = "記事"; draft.description = "説明"; draft.music = [item]
+        for raw in [item.youtubeURL, "https://music.apple.com/us/song/1053934844", "https://music.amazon.com/tracks/B084KPC3Q7", "https://unavailable.example/song"] {
+            draft.music[0].youtubeURL = raw
+            XCTAssertNil(draft.validation); XCTAssertTrue(draft.markdown.contains("<iframe"))
+            XCTAssertEqual(try JSONDecoder().decode(Draft.self, from: JSONEncoder().encode(draft)).music[0].youtubeURL, raw)
+        }
+        draft.music[0].confirmed = false
+        XCTAssertNotNil(draft.validation); XCTAssertFalse(draft.markdown.contains("<iframe"))
+    }
+    private func multiServiceResolver() -> PublicMusicResolver {
+        let config = URLSessionConfiguration.ephemeral; config.protocolClasses = [MultiServiceMusicFixture.self]
+        return PublicMusicResolver(session: URLSession(configuration: config))
+    }
     func testMusicMetadataAndPublicPageParsing() throws {
         let embed = Data(#"{"title":"Coldplay - Hymn For The Weekend (Official Video)","author_name":"Coldplay"}"#.utf8)
         let info = try MusicPageParser.oembed(embed)
@@ -1072,6 +1208,48 @@ private final class DestinationFixture: URLProtocol {
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: try! JSONSerialization.data(withJSONObject: payload))
         client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+private final class MultiServiceMusicFixture: URLProtocol {
+    static func songlink(provider: String, id: String, title: String = "Selfless", type: String = "song") -> String {
+        "<script id=\"__NEXT_DATA__\">" + "{\"props\":{\"pageProps\":{\"pageData\":{\"entityData\":{\"provider\":\"\(provider)\",\"id\":\"\(id)\",\"type\":\"\(type)\",\"title\":\"\(title)\",\"artistName\":\"The Strokes\"},\"sections\":[{\"links\":[{\"platform\":\"spotify\",\"url\":\"https://open.spotify.com/track/0123456789ABCDEFGHIJKL\"},{\"platform\":\"spotify\",\"url\":\"https://open.spotify.com/album/0123456789ABCDEFGHIJKL\"}]}]}}}}" + "</script>"
+    }
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let url = request.url!, host = url.host!, id = url.lastPathComponent
+        var final = url, status = 200, text = ""
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        func value(_ key: String) -> String { items.first { $0.name == key }?.value ?? "" }
+        if ["apple.co", "amzn.to"].contains(host) {
+            switch id {
+            case "good123": final = URL(string: "https://music.apple.com/us/song/1053934844")!
+            case "cross123": final = URL(string: "https://music.amazon.com/tracks/B084KPC3Q7")!
+            case "album123": final = URL(string: "https://music.amazon.com/albums/B084KP4NBH")!
+            default: final = URL(string: "https://evil.example/song")!
+            }
+        } else if host == "song.link" {
+            if ["1053934844", "B084KPC3Q7", "10539348440"].contains(id) {
+                let provider = url.path.hasPrefix("/i/") ? "itunes" : url.path.hasPrefix("/y/") ? "youtube" : "amazon"
+                text = Self.songlink(provider: provider, id: id, title: id == "10539348440" ? (provider == "youtube" ? "YouTube Song" : "Apple Song") : "Selfless")
+            } else if id == "222" { text = Self.songlink(provider: "itunes", id: id, type: "album") }
+            else { status = 503 }
+        } else if host == "itunes.apple.com" {
+            text = value("id") == "222" ? "{\"results\":[{\"kind\":\"song\",\"trackId\":222,\"trackName\":\"Lookup \(value("country").uppercased())\",\"artistName\":\"Artist\"}]}" : "{\"results\":[]}"
+        } else if host == "music.apple.com" || SharedMusicLink.amazonHosts.contains(host) {
+            if ["333", "B000PUBLIC"].contains(id) {
+                text = "<script type='application/ld+json'>{\"@type\":\"MusicRecording\",\"url\":\"\(url.absoluteString)\",\"name\":\"Public Song\",\"byArtist\":{\"name\":\"Public Artist\"}}</script>"
+            } else if id == "B000REDIR1" { final = URL(string: "https://music.amazon.com/tracks/B084KPC3Q7")! }
+            else { text = "<html>Sign in</html>" }
+        } else if host == "open.spotify.com" {
+            text = #"<meta property="og:title" content="Selfless"><meta property="og:description" content="The Strokes · Album · Song · 2020"><meta property="og:type" content="music.song">"#
+        } else if host == "musicbrainz.org" {
+            text = url.path == "/ws/2/artist" ? "{\"artists\":[]}" : "{\"recordings\":[]}"
+        } else { status = 503 }
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: final, statusCode: status, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(text.utf8)); client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}
 }

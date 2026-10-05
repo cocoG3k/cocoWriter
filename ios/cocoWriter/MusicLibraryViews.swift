@@ -14,7 +14,7 @@ import SwiftUI
                 if let error = library.storageError ?? drafts.storageError { Text(error).font(.caption).foregroundStyle(.red) }
                 Section {
                     Button { picking = true } label: { Label("ストックから曲紹介を書く", systemImage: "square.and.pencil") }
-                        .disabled(library.items.isEmpty || !drafts.loaded || drafts.storageError != nil)
+                        .disabled(library.items.isEmpty || !drafts.loaded || drafts.storageError != nil || drafts.categorySettingsError != nil)
                         .accessibilityIdentifier("music-library-create-article")
                 } footer: { Text("投稿した曲はストックから外れ、記事を下書きに戻すと再び表示されます。記事内での編集は、その記事にだけ反映されます。") }
                 Section("保存した曲・アルバム（\(library.items.count)件）") {
@@ -24,14 +24,14 @@ import SwiftUI
                             .accessibilityIdentifier("music-library-row-" + item.id.uuidString)
                     }
                 }
-            }.writerCanvas().writerChrome().navigationTitle("曲のストック").navigationBarTitleDisplayMode(.inline)
+            }.writerCanvas().writerChrome().navigationTitle("アルバム").navigationBarTitleDisplayMode(.inline)
                 .searchable(text: $search, prompt: "曲名・アーティスト・紹介文")
                 .toolbar { Button { let item = MusicItem(); if library.update(item) { editing = item } } label: { Image(systemName: "plus") }.disabled(!library.loaded).accessibilityLabel("曲をストックに追加").accessibilityIdentifier("music-library-add") }
                 .sheet(item: $editing) { item in MusicLibraryEditor(item: item) }
                 .sheet(item: $article) { draft in NavigationStack { EditorView(draft: draft) } }
                 .sheet(isPresented: $picking, onDismiss: { article = pendingArticle; pendingArticle = nil }) {
                     MusicLibraryPicker(existing: []) { items in
-                        var draft = Draft(kind: .music); draft.tags = "曲紹介"; draft.music = MusicLibraryStore.articleCopies(items)
+                        var draft = drafts.newDraft(kind: .music); draft.tags = "曲紹介"; draft.music = MusicLibraryStore.articleCopies(items)
                         if drafts.update(draft) { pendingArticle = draft }
                     }
                 }
@@ -73,7 +73,7 @@ import SwiftUI
         NavigationStack {
             List {
                 if let error = library.storageError { Text(error).foregroundStyle(.red) }
-                if library.items.isEmpty { Text("「曲のストック」で先に曲を保存してください。") }
+                if library.items.isEmpty { Text("「アルバム」で先に曲を保存してください。") }
                 ForEach(library.items.filter { musicMatches($0, search: search) }) { item in
                     Button {
                         if selected.contains(item.id) { selected.remove(item.id) } else { selected.insert(item.id) }

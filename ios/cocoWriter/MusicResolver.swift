@@ -54,23 +54,49 @@ actor PublicMusicResolver {
         self.session = session ?? URLSession(configuration: config)
     }
     func resolve(_ url: URL) async throws -> MusicResolution {
-        guard MusicLink.youtube(url.absoluteString) != nil, let id = MusicLink.videoID(url) else {
-            throw WriterError.message("曲の watch?v=… のURLを入力してください。プレイリストの一括変換には対応していません。")
+        guard var source = SharedMusicLink.parse(url.absoluteString) else { throw WriterError.message("YouTube Music・Apple Music・Amazon Musicの共有URLを入力してください。曲情報の手入力やSpotify検索・URL貼り付けでも続けられます。") }
+        if let issue = source.issue { throw WriterError.message(issue) }
+        let key = source.cacheKey
+        if let cached = cache[key], Date().timeIntervalSince(cached.0) < 600 { return cached.1 }
+        if source.isShort {
+            let (_, finalURL) = try await fetch(source.url, sharing: source.service)
+            guard let expanded = SharedMusicLink.parse(finalURL.absoluteString), !expanded.isShort, expanded.service == source.service else {
+                throw WriterError.message("短縮URLの転送先から曲を特定できません。曲の元の共有URLを使うか、手入力・Spotify検索で続けてください。")
+            }
+            source = expanded
+            if let issue = source.issue { throw WriterError.message(issue) }
         }
-        if let cached = cache[id], Date().timeIntervalSince(cached.0) < 600 { return cached.1 }
+        guard let id = source.trackID else { throw WriterError.message("曲IDがありません。曲の共有URLを入力してください。") }
         var metadata: MusicMetadata?
         var directLinks: [SpotifyLink] = []
-        // Songlink's public page may contain a service mapping; its discontinued API is not used.
+        let code: String
+        switch source.service { case .youtube: code = "y"; case .apple: code = "i"; case .amazon: code = "a" }
+        // Public Songlink pages, validated against the exact provider, song type and ID.
         do {
-            let html = try await page(URL(string: "https://song.link/y/\(id)")!)
-            let parsed = try MusicPageParser.songlink(html, videoID: id)
+            let html = try await page(URL(string: "https://song.link/\(code)/\(id)")!)
+            let parsed = try MusicPageParser.songlink(html, source: source)
             metadata = parsed.0; directLinks = parsed.1
         } catch { try Task.checkCancellation() }
         if metadata == nil {
-            var endpoint = URLComponents(string: "https://www.youtube.com/oembed")!
-            endpoint.queryItems = [URLQueryItem(name: "url", value: "https://www.youtube.com/watch?v=\(id)"), URLQueryItem(name: "format", value: "json")]
-            do { metadata = try MusicPageParser.oembed(await data(endpoint.url!)) }
-            catch { try Task.checkCancellation(); throw WriterError.message("曲情報を取得できませんでした。通信や公開状態を確認し、再取得するか手入力してください。") }
+            do {
+                switch source.service {
+                case .youtube:
+                    var endpoint = URLComponents(string: "https://www.youtube.com/oembed")!
+                    endpoint.queryItems = [.init(name: "url", value: "https://www.youtube.com/watch?v=\(id)"), .init(name: "format", value: "json")]
+                    metadata = try MusicPageParser.oembed(await data(endpoint.url!))
+                case .apple:
+                    var endpoint = URLComponents(string: "https://itunes.apple.com/lookup")!
+                    endpoint.queryItems = [.init(name: "id", value: id), .init(name: "country", value: source.country ?? "us"), .init(name: "entity", value: "song")]
+                    do { metadata = try MusicPageParser.appleLookup(await data(endpoint.url!), trackID: id) }
+                    catch { try Task.checkCancellation(); metadata = try MusicPageParser.publicSong(await page(source.url), source: source) }
+                case .amazon:
+                    metadata = try MusicPageParser.publicSong(await page(source.url), source: source)
+                }
+            } catch {
+                try Task.checkCancellation()
+                let reason = source.service == .amazon ? "公開ページに曲情報がない、地域制限、または通信・公開状態の問題が考えられます。Amazonの公式APIは認証と利用承認が必要なため使用していません。" : "通信・公開状態や地域のカタログ掲載を確認してください。"
+                throw WriterError.message("\(source.service.name)の曲情報を取得できませんでした。\(reason)再取得するか、曲名・アーティストを手入力し、Spotify検索・URL貼り付けで続けてください。")
+            }
         }
         let info = metadata!
         var candidates: [MusicCandidate] = []
@@ -92,16 +118,17 @@ actor PublicMusicResolver {
         }
         notice = candidates.isEmpty ? "別表記でも検索しましたが、公開情報からSpotify候補を取得できませんでした。再取得するか、Spotifyで検索して共有URLを貼り付けてください。" : nil
         let result = MusicResolution(metadata: info, candidates: candidates, notice: notice)
-        cache[id] = (Date(), result)
+        cache[key] = (Date(), result)
         return result
     }
     func refresh(_ url: URL) async throws -> MusicResolution {
-        if let id = MusicLink.videoID(url) { cache[id] = nil }
+        if let source = SharedMusicLink.parse(url.absoluteString) { cache[source.cacheKey] = nil }
         return try await resolve(url)
     }
-    private func data(_ url: URL) async throws -> Data {
+    private func data(_ url: URL) async throws -> Data { try await fetch(url).0 }
+    private func fetch(_ url: URL, sharing: MusicService? = nil) async throws -> (Data, URL) {
         try Task.checkCancellation()
-        guard ["song.link", "www.youtube.com", "musicbrainz.org", "open.spotify.com", "itunes.apple.com"].contains(url.host ?? ""), url.scheme == "https" else { throw WriterError.message("取得先のURLが不正です。") }
+        guard MusicRedirectPolicy.allows(url, sharing: sharing) else { throw WriterError.message("取得先のURLが不正です。") }
         if url.host == "musicbrainz.org" {
             // Reserve each slot before awaiting; concurrent song rows still share the 1/sec limit.
             let start = max(Date(), nextMusicBrainzRequest)
@@ -119,10 +146,11 @@ actor PublicMusicResolver {
         request.setValue("cocoWriter/0.1 (iOS; personal blog writer)", forHTTPHeaderField: "User-Agent")
         // Consistent metadata language prevents translated artist names from breaking matching.
         if url.host == "open.spotify.com" { request.setValue("en", forHTTPHeaderField: "Accept-Language") }
-        let (body, response) = try await session.data(for: request)
+        let redirects = MusicRedirectPolicy(sharing: sharing)
+        let (body, response) = try await session.data(for: request, delegate: redirects)
         try Task.checkCancellation()
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200, body.count < 3_000_000 else { throw WriterError.message("公開情報を取得できませんでした。") }
-        return body
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200, body.count < 3_000_000, let finalURL = http.url, MusicRedirectPolicy.allows(finalURL, sharing: sharing), MusicRedirectPolicy.preservesIdentity(from: url, to: finalURL) else { throw WriterError.message("公開情報を取得できませんでした。通信・公開状態、または短縮URLの転送先を確認し、手入力・Spotify検索で続けてください。") }
+        return (body, finalURL)
     }
     private func page(_ url: URL) async throws -> String {
         guard let html = String(data: try await data(url), encoding: .utf8) else { throw WriterError.message("ページを読み取れませんでした。") }
@@ -267,6 +295,31 @@ actor PublicMusicResolver {
     }
 }
 
+final class MusicRedirectPolicy: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    let sharing: MusicService?
+    private var count = 0
+    private let lock = NSLock()
+    init(sharing: MusicService?) { self.sharing = sharing }
+    static func allows(_ url: URL, sharing: MusicService? = nil) -> Bool {
+        guard let c = SharedMusicLink.safeComponents(url.absoluteString), let host = c.host?.lowercased() else { return false }
+        if let sharing {
+            if let source = SharedMusicLink.parse(url.absoluteString) { return source.service == sharing }
+            return false
+        }
+        return ["song.link", "album.link", "www.youtube.com", "musicbrainz.org", "open.spotify.com", "itunes.apple.com", "music.apple.com"].contains(host) || SharedMusicLink.amazonHosts.contains(host)
+    }
+    static func preservesIdentity(from original: URL, to final: URL) -> Bool {
+        guard let source = SharedMusicLink.parse(original.absoluteString), !source.isShort, let id = source.trackID else { return true }
+        guard let destination = SharedMusicLink.parse(final.absoluteString) else { return false }
+        return destination.service == source.service && destination.trackID == id
+    }
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        lock.lock(); count += 1; let withinLimit = count <= 5; lock.unlock()
+        guard withinLimit, let url = request.url, Self.allows(url, sharing: sharing), task.originalRequest?.url.map({ Self.preservesIdentity(from: $0, to: url) }) ?? false else { completionHandler(nil); return }
+        completionHandler(request)
+    }
+}
+
 struct MusicSearchPlan: Equatable {
     private(set) var titles: [String] = []
     private(set) var artists: [String] = []
@@ -348,10 +401,41 @@ enum MusicPageParser {
         return result
     }
     static func songlink(_ html: String, videoID: String) throws -> (MusicMetadata, [SpotifyLink]) {
-        guard let json = matches("<script[^>]*id=\"__NEXT_DATA__\"[^>]*>(.*?)</script>", in: html).first?[1], let data = json.data(using: .utf8), let root = try JSONSerialization.jsonObject(with: data) as? [String: Any], let props = root["props"] as? [String: Any], let pageProps = props["pageProps"] as? [String: Any], let page = pageProps["pageData"] as? [String: Any], let entity = page["entityData"] as? [String: Any], entity["id"] as? String == videoID, entity["provider"] as? String == "youtube", let title = entity["title"] as? String, let artist = entity["artistName"] as? String, !title.isEmpty, !artist.isEmpty else { throw WriterError.message("曲情報がありません。") }
-        let metadata = clean(title: title, artist: artist, duration: entity["duration"] as? Int)
-        let links = (page["sections"] as? [[String: Any]] ?? []).flatMap { $0["links"] as? [[String: Any]] ?? [] }.filter { $0["platform"] as? String == "spotify" }.compactMap { ($0["url"] as? String).flatMap(SpotifyLink.init) }
+        try songlink(html, source: MusicSourceLink(service: .youtube, url: URL(string: "https://music.youtube.com/watch?v=" + videoID)!, trackID: videoID))
+    }
+    static func songlink(_ html: String, source: MusicSourceLink) throws -> (MusicMetadata, [SpotifyLink]) {
+        let provider: String
+        switch source.service { case .youtube: provider = "youtube"; case .apple: provider = "itunes"; case .amazon: provider = "amazon" }
+        guard let json = matches("<script[^>]*id=\"__NEXT_DATA__\"[^>]*>(.*?)</script>", in: html).first?[1], let data = json.data(using: .utf8), let root = try JSONSerialization.jsonObject(with: data) as? [String: Any], let props = root["props"] as? [String: Any], let pageProps = props["pageProps"] as? [String: Any], let page = pageProps["pageData"] as? [String: Any], let entity = page["entityData"] as? [String: Any], entity["id"] as? String == source.trackID, entity["provider"] as? String == provider,
+              (entity["type"] as? String == "song" || (source.service == .youtube && entity["type"] == nil)),
+              let title = entity["title"] as? String, let artist = entity["artistName"] as? String, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !artist.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw WriterError.message("対応する曲情報がありません。") }
+        let metadata = source.service == .youtube ? clean(title: title, artist: artist, duration: entity["duration"] as? Int) : MusicMetadata(title: title, artist: artist, duration: entity["duration"] as? Int)
+        let links = (page["sections"] as? [[String: Any]] ?? []).flatMap { $0["links"] as? [[String: Any]] ?? [] }.filter { $0["platform"] as? String == "spotify" }.compactMap { ($0["url"] as? String).flatMap(SpotifyLink.init) }.filter { $0.kind == "track" }
         return (metadata, links)
+    }
+    static func appleLookup(_ data: Data, trackID: String) throws -> MusicMetadata {
+        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any], let results = root["results"] as? [[String: Any]], let song = results.first(where: { ($0["trackId"] as? NSNumber)?.stringValue == trackID && $0["kind"] as? String == "song" }), let title = song["trackName"] as? String, let artist = song["artistName"] as? String, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !artist.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw WriterError.message("指定した曲IDはこの地域のカタログにありません。") }
+        return MusicMetadata(title: title, artist: artist, duration: song["trackTimeMillis"] as? Int)
+    }
+    // Schema.org public metadata only; do not inspect internal player APIs or guess from album titles.
+    static func publicSong(_ html: String, source: MusicSourceLink) throws -> MusicMetadata {
+        func objects(_ value: Any) -> [[String: Any]] {
+            if let array = value as? [Any] { return array.flatMap(objects) }
+            guard let object = value as? [String: Any] else { return [] }
+            return [object] + ["@graph", "audio"].flatMap { object[$0].map(objects) ?? [] }
+        }
+        for script in matches(#"<script[^>]*type=["']application/ld\+json["'][^>]*>(.*?)</script>"#, in: html) {
+            guard let data = script[1].data(using: .utf8), let json = try? JSONSerialization.jsonObject(with: data) else { continue }
+            for song in objects(json) where song["@type"] as? String == "MusicRecording" {
+                guard let rawURL = song["url"] as? String, let link = SharedMusicLink.parse(rawURL), link.service == source.service, link.trackID == source.trackID, source.trackID != nil,
+                      let title = song["name"] as? String, let artists = song["byArtist"] else { continue }
+                let credits = (artists as? [[String: Any]]) ?? (artists as? [String: Any]).map { [$0] } ?? []
+                let artist = credits.compactMap { $0["name"] as? String }.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }.joined(separator: " / ")
+                guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !artist.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+                return MusicMetadata(title: title, artist: artist, duration: nil)
+            }
+        }
+        throw WriterError.message("公開ページに指定した曲のメタデータがありません。")
     }
     static func oembed(_ data: Data) throws -> MusicMetadata {
         struct Embed: Decodable { let title: String; let author_name: String }

@@ -10,7 +10,7 @@ import SwiftUI
     var body: some View {
         TabView(selection: $tab) {
             ArticleLibraryView().tabItem { Label("記事", systemImage: "doc.text") }.tag(0)
-            MusicLibraryView().tabItem { Label("曲のストック", systemImage: "music.note.list") }.tag(3)
+            MusicLibraryView().tabItem { Label("アルバム", systemImage: "photo.on.rectangle.angled") }.tag(3)
             PrivateNotesView().tabItem { Label("自分のメモ", systemImage: "note.text") }.tag(1)
             SettingsView().tabItem { Label("設定", systemImage: "gearshape") }.tag(2)
         }
@@ -43,17 +43,29 @@ import SwiftUI
 @MainActor struct ArticleLibraryView: View {
     @EnvironmentObject private var store: DraftStore
     @State private var shelf: ArticleShelf = .drafts
-    @State private var filter: ArticleFilter = .all
-    @State private var selected: Draft?
-    @State private var deletingPublished: Draft?
+    @State private var selectedArticleTag: String?
+    @State private var categoryFilter: String?
+    @State private var destination: ArticleDestination?
     @State private var syncing = false
     @State private var syncError: String?
     @AppStorage("article-published-sort") private var publishedSort: PublishedArticleSort = .newest
     @State private var managing = false
     @State private var selection = Set<UUID>()
-    @State private var trash = false
     @State private var message: String?
-    private var items: [Draft] { ArticleLibrary.items(store.drafts, shelf: shelf, filter: filter, publishedSort: publishedSort) }
+    private var items: [Draft] {
+        ArticleLibrary.items(store.drafts, shelf: shelf, publishedSort: publishedSort)
+            .filter { draft in selectedArticleTag.map { RepositoryArticleMarkdown.tagValues(draft.tags).contains($0) } ?? true }
+            .filter { categoryFilter == nil || store.categoryID(for: $0) == categoryFilter }
+    }
+    private var shelfItems: [Draft] {
+        ArticleLibrary.items(store.drafts, shelf: shelf)
+            .filter { categoryFilter == nil || store.categoryID(for: $0) == categoryFilter }
+    }
+    private var articleTags: [String] {
+        var tags = Set(shelfItems.flatMap { RepositoryArticleMarkdown.tagValues($0.tags) })
+        if let selectedArticleTag { tags.insert(selectedArticleTag) }
+        return tags.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
     private var trashCount: Int { store.drafts.filter { $0.deletedAt != nil }.count }
     private var publisher: GitHubPublisher { GitHubPublisher(configuration: store.site) }
     var body: some View {
@@ -65,18 +77,28 @@ import SwiftUI
                         ForEach(ArticleShelf.allCases) { value in Text("\(value.label) \(ArticleLibrary.items(store.drafts, shelf: value).count)").tag(value) }
                     }.pickerStyle(.segmented).accessibilityIdentifier("article-shelf")
                     HStack(spacing: 7) {
-                        ForEach(ArticleFilter.allCases) { value in
-                            filterButton("\(value.label) \(ArticleLibrary.items(store.drafts, shelf: shelf, filter: value).count)", active: filter == value) { filter = value }
-                                .accessibilityLabel(value.label).accessibilityIdentifier("article-filter-" + value.rawValue)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 7) {
+                                filterButton("全て \(shelfItems.count)", active: selectedArticleTag == nil) { selectedArticleTag = nil }
+                                    .accessibilityIdentifier("article-filter-all")
+                                ForEach(articleTags, id: \.self) { tag in
+                                    filterButton("#" + tag + " \(shelfItems.filter { RepositoryArticleMarkdown.tagValues($0.tags).contains(tag) }.count)", active: selectedArticleTag == tag) { selectedArticleTag = tag }
+                                        .accessibilityIdentifier("article-filter-tag-" + tag)
+                                }
+                            }
                         }
                         Spacer(minLength: 0)
+                        Menu {
+                            Button("すべてのカテゴリ") { categoryFilter = nil }
+                            ForEach(store.categories) { category in Button(category.name) { categoryFilter = category.id } }
+                        } label: {
+                            Label(store.categories.first { $0.id == categoryFilter }?.name ?? "カテゴリ", systemImage: "folder")
+                                .font(.caption).lineLimit(1)
+                        }.accessibilityIdentifier("article-category-filter")
                     }
-                    HStack(spacing: 10) {
-                        ForEach(PostKind.allCases) { kind in
-                            Button { create(kind) } label: { Label("\(kind.label)を書く", systemImage: kind.symbol).font(.subheadline).frame(maxWidth: .infinity, minHeight: 28) }
-                                .buttonStyle(.bordered).disabled(!store.loaded || managing || syncing)
-                        }
-                    }
+                    Button { create() } label: { Label("記事を書く", systemImage: "square.and.pencil").font(.subheadline).frame(maxWidth: .infinity, minHeight: 28) }
+                        .buttonStyle(.bordered).disabled(!store.loaded || managing || syncing)
+                        .accessibilityIdentifier("article-create")
                 }.padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 6)
                 List {
                     Group {
@@ -95,17 +117,17 @@ import SwiftUI
                         ForEach(items) { draft in
                             Button {
                                 if managing { if selection.contains(draft.id) { selection.remove(draft.id) } else if !draft.hasPendingOperation { selection.insert(draft.id) } }
-                                else if draft.pendingDeletionSHA != nil { deletingPublished = draft }
-                                else { selected = draft }
+                                else if draft.pendingDeletionSHA != nil { destination = .deletion(draft.id) }
+                                else { destination = .editor(draft) }
                             } label: {
-                                CompactArticleRow(draft: draft, selecting: managing, selected: selection.contains(draft.id))
+                                CompactArticleRow(draft: draft, category: store.categoryLabel(for: draft), selecting: managing, selected: selection.contains(draft.id))
                             }.buttonStyle(.plain).disabled(syncing).listRowInsets(EdgeInsets(top: 7, leading: 16, bottom: 7, trailing: 16))
                                 .accessibilityIdentifier("article-row-" + draft.id.uuidString)
-                                .accessibilityLabel("\(draft.displayTitle)、\(draft.kind.label)、\(draft.pendingMarkdown != nil ? "送信結果の確認待ち" : shelf.label)")
+                                .accessibilityLabel("\(draft.displayTitle)、\(store.categoryLabel(for: draft))、\(draft.pendingMarkdown != nil ? "送信結果の確認待ち" : shelf.label)")
                                 .accessibilityValue(selection.contains(draft.id) ? "選択済み" : "")
                                 .swipeActions(edge: .trailing, allowsFullSwipe: shelf == .drafts) {
                                     if shelf == .published {
-                                        Button(role: .destructive) { deletingPublished = draft } label: { Label("サイトから削除", systemImage: "trash") }.disabled(managing || syncing)
+                                        Button(role: .destructive) { destination = .deletion(draft.id) } label: { Label("サイトから削除", systemImage: "trash") }.disabled(managing || syncing)
                                     } else {
                                         Button(role: .destructive) { remove([draft.id]) } label: { Label("ゴミ箱へ", systemImage: "trash") }.disabled(draft.hasPendingOperation || managing)
                                     }
@@ -115,9 +137,11 @@ import SwiftUI
                                 }
                                 .contextMenu {
                                     Button(draft.pinnedAt == nil ? "ピン留め" : "ピン解除", systemImage: "pin") { store.togglePin(draft.id) }
-                                    Button("複製して下書きにする", systemImage: "doc.on.doc") { selected = store.duplicate(draft.id); shelf = .drafts; filter = .all }.disabled(draft.hasPendingOperation)
+                                    Button("複製して下書きにする", systemImage: "doc.on.doc") {
+                                        if let copy = store.duplicate(draft.id) { shelf = .drafts; selectedArticleTag = nil; destination = .editor(copy) }
+                                    }.disabled(draft.hasPendingOperation)
                                     if draft.isPublished {
-                                        Button("サイトから削除…", systemImage: "trash", role: .destructive) { deletingPublished = draft }
+                                        Button("サイトから削除…", systemImage: "trash", role: .destructive) { destination = .deletion(draft.id) }
                                             .accessibilityIdentifier("delete-published-" + draft.id.uuidString)
                                     }
                                     Button("端末のゴミ箱へ移動", systemImage: "trash", role: .destructive) { remove([draft.id]) }.disabled(draft.hasPendingOperation)
@@ -151,7 +175,7 @@ import SwiftUI
                             }
                             Button("GitHubの記事を読み込む", systemImage: "arrow.clockwise") { Task { await refreshPublished() } }
                                 .disabled(syncing || managing).accessibilityIdentifier("article-sync")
-                            Button("ゴミ箱（\(trashCount)）", systemImage: "trash") { trash = true }
+                            Button("ゴミ箱（\(trashCount)）", systemImage: "trash") { destination = .trash }
                             if managing { Button("表示中を全て選択") { selection = Set(items.filter { !$0.hasPendingOperation }.map(\.id)) } }
                         } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("記事の管理")
                     }
@@ -166,34 +190,44 @@ import SwiftUI
                     }
                 }
                 .onChange(of: shelf) { _, _ in selection.removeAll() }
-                .onChange(of: filter) { _, _ in selection.removeAll() }
+                .onChange(of: selectedArticleTag) { _, _ in selection.removeAll() }
+                .onChange(of: categoryFilter) { _, _ in selection.removeAll() }
                 .onChange(of: publishedSort) { _, _ in selection.removeAll() }
-                .sheet(item: $selected) { draft in NavigationStack { EditorView(draft: draft) }.environmentObject(store) }
-                .sheet(item: $deletingPublished) { draft in PublishedDeletionView(articleID: draft.id).environmentObject(store) }
-                .sheet(isPresented: $trash) { ArticleTrashView().environmentObject(store) }
                 .task(id: shelf) { if shelf == .published { await refreshPublished() } }
                 .alert("管理", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) { Button("OK") { message = nil } } message: { Text(message ?? "") }
+        }.sheet(item: $destination) { target in
+            switch target {
+            case .editor(let draft): NavigationStack { EditorView(draft: draft) }
+            case .deletion(let id): PublishedDeletionView(articleID: id)
+            case .trash: ArticleTrashView()
+            }
         }
     }
     private func refreshPublished() async {
         store.beginRemoteOperation()
         defer { store.endRemoteOperation() }
-        guard !syncing, selected == nil, deletingPublished == nil, !managing, store.loaded, store.storageError == nil else { return }
+        guard !syncing, destination == nil, !managing, store.loaded, store.storageError == nil else { return }
+        if let error = store.categorySettingsError { syncError = error; return }
         syncing = true; syncError = nil
         defer { syncing = false }
         do {
             let token = (try? TokenVault.read()) ?? ""
-            let remote = try await publisher.publishedArticles(token: token)
+            let categories = store.categories
+            let remote = try await publisher.publishedArticles(token: token, categories: categories, knownArticles: store.drafts)
             try Task.checkCancellation()
-            guard store.mergePublishedArticles(remote) else { syncError = store.storageError; return }
+            guard store.mergePublishedArticles(remote, scannedProfiles: categories.filter(\.isEnabled).map(\.profile), scannedCategories: categories) else { syncError = store.storageError; return }
             if store.drafts.contains(where: { $0.remoteChanged == true }) { syncError = "GitHub側にも変更がある記事があります。端末の編集中の内容を残しました。" }
         } catch is CancellationError { }
         catch { syncError = "記事を読み込めませんでした。保存済みの記事は残っています。\n\(error.localizedDescription)" }
     }
-    private func create(_ kind: PostKind) {
-        var draft = Draft(kind: kind); draft.tags = kind == .music ? "曲紹介" : "日記"
-        if kind == .music { draft.music = [MusicItem()] }
-        if store.update(draft) { shelf = .drafts; filter = .all; selected = draft }
+    private func create() {
+        if let error = store.categorySettingsError { message = error; return }
+        let draft = store.newDraft()
+        // A failed disk save still retains the draft in memory. Open its editor so
+        // the save error and retry action are visible instead of dropping the tap.
+        _ = store.update(draft)
+        shelf = .drafts; selectedArticleTag = nil; categoryFilter = nil
+        destination = .editor(draft)
     }
     private func remove(_ ids: Set<UUID>) {
         if store.moveToTrash(ids) { selection.subtract(ids) }
@@ -201,20 +235,32 @@ import SwiftUI
     }
 }
 
+private enum ArticleDestination: Identifiable {
+    case editor(Draft), deletion(UUID), trash
+    var id: String {
+        switch self {
+        case .editor(let draft): return "editor-" + draft.id.uuidString
+        case .deletion(let id): return "delete-" + id.uuidString
+        case .trash: return "trash"
+        }
+    }
+}
+
 private struct CompactArticleRow: View {
     let draft: Draft
+    let category: String
     var selecting = false
     var selected = false
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: selecting ? (selected ? "checkmark.circle.fill" : "circle") : draft.kind.symbol).foregroundStyle(Color.accentColor).font(.body).frame(width: 22)
+            Image(systemName: selecting ? (selected ? "checkmark.circle.fill" : "circle") : draft.containsMusic ? "music.note" : "doc.text").foregroundStyle(Color.accentColor).font(.body).frame(width: 22)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {
                     Text(draft.displayTitle).font(.subheadline.weight(.medium)).foregroundStyle(WriterPalette.text).lineLimit(1)
                     if draft.pinnedAt != nil { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(WriterPalette.secondary) }
                 }
                 HStack(spacing: 6) {
-                    Text(draft.kind.label)
+                    Text(category).lineLimit(1)
                     Text(draft.isPublished ? draft.date : draft.updatedAt, format: .dateTime.month().day())
                     if draft.pendingMarkdown != nil { Text("結果確認待ち").foregroundStyle(.orange) }
                     else if draft.pendingDeletionSHA != nil { Text("削除確認待ち").foregroundStyle(.orange) }
@@ -235,7 +281,7 @@ private struct CompactArticleRow: View {
     @State private var working = false
     @State private var completed = false
     @State private var message: String?
-    private var publisher: GitHubPublisher { GitHubPublisher(configuration: store.site) }
+    private var publisher: GitHubPublisher { GitHubPublisher(configuration: store.site, profile: draft?.publicationProfile ?? .current) }
     private var draft: Draft? { store.drafts.first { $0.id == articleID } }
     var body: some View {
         NavigationStack {
@@ -325,7 +371,7 @@ private struct CompactArticleRow: View {
                     if items.isEmpty { Text("ゴミ箱は空です").foregroundStyle(WriterPalette.secondary) }
                     ForEach(items) { draft in
                         VStack(alignment: .leading, spacing: 5) {
-                            CompactArticleRow(draft: draft)
+                            CompactArticleRow(draft: draft, category: store.categoryLabel(for: draft))
                             HStack {
                                 Button("復元") { store.restore(draft.id) }.accessibilityIdentifier("restore-article-" + draft.id.uuidString)
                                 Spacer()

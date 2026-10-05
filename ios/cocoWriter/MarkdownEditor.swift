@@ -124,6 +124,10 @@ struct MarkdownEditor: View {
     @Binding var text: String
     var identifier = "body-editor"
     var minHeight: CGFloat = 240
+    var onAddMusic: (() -> Void)?
+    var onChooseMusic: (() -> Void)?
+    var onAddPhoto: (() -> Void)?
+    var onAddImageFile: (() -> Void)?
     @StateObject private var control = MarkdownEditorControl()
     var body: some View {
         VStack(spacing: 0) {
@@ -136,13 +140,33 @@ struct MarkdownEditor: View {
                     .accessibilityLabel("見出し").accessibilityIdentifier(identifier + "-heading")
                 tool("B", label: "太字", action: .bold, font: .body.bold())
                 tool("I", label: "斜体", action: .italic, font: .body.italic())
-                icon("list.bullet", label: "箇条書き", action: .bullet)
-                icon("list.number", label: "番号付きリスト", action: .numbered)
+                if onAddMusic == nil && onAddPhoto == nil {
+                    icon("list.bullet", label: "箇条書き", action: .bullet)
+                    icon("list.number", label: "番号付きリスト", action: .numbered)
+                }
                 Menu {
+                    if onAddMusic != nil || onAddPhoto != nil {
+                        Button("箇条書き") { control.apply(.bullet) }
+                        Button("番号付きリスト") { control.apply(.numbered) }
+                    }
                     Button("引用") { control.apply(.quote) }
                     Button("コード") { control.apply(.code) }
                     Button("リンク") { control.apply(.link) }
                 } label: { Image(systemName: "ellipsis").frame(width: 36, height: 40) }.accessibilityLabel("その他の書式")
+                if let onAddMusic {
+                    Menu {
+                        Button("曲紹介を書く") { control.dismissKeyboard(); onAddMusic() }
+                        if let onChooseMusic { Button("ストックから選ぶ") { control.dismissKeyboard(); onChooseMusic() } }
+                    } label: { Image(systemName: "music.note").frame(width: 36, height: 40) }
+                        .accessibilityLabel("曲紹介を追加").accessibilityIdentifier(identifier + "-music")
+                }
+                if let onAddPhoto {
+                    Menu {
+                        Button("写真から追加") { control.dismissKeyboard(); onAddPhoto() }
+                        if let onAddImageFile { Button("画像ファイルから追加") { control.dismissKeyboard(); onAddImageFile() } }
+                    } label: { Image(systemName: "photo").frame(width: 36, height: 40) }
+                        .accessibilityLabel("画像を追加").accessibilityIdentifier(identifier + "-image")
+                }
                 Spacer(minLength: 0)
                 Button { control.dismissKeyboard() } label: { Image(systemName: "keyboard.chevron.compact.down").frame(width: 34, height: 40) }
                     .accessibilityLabel("キーボードを閉じる")

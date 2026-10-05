@@ -70,13 +70,13 @@ import Combine
             if let index, reservations[index].remoteSHA == sha || draft.hasPendingOperation { continue }
             // Imported Markdown does not retain the original structured song
             // fields. Keep the association when loading a newer remote revision.
-            if let index, draft.repositorySource != nil {
+            if let index, draft.repositorySource != nil && draft.music.isEmpty {
                 reservations[index].remoteSHA = sha
                 continue
             }
-            guard draft.kind == .music || index != nil else { continue }
-            var ids: [UUID] = []
-            for item in draft.kind == .music ? draft.music : [] {
+            guard !draft.music.isEmpty || index != nil else { continue }
+            var ids: [UUID] = draft.repositorySource != nil ? (index.map { reservations[$0].stockIDs } ?? []) : []
+            for item in draft.music {
                 let id = item.sourceID ?? item.id
                 if !ids.contains(id) { ids.append(id) }
                 if !next.contains(where: { ($0.sourceID ?? $0.id) == id }) {
@@ -114,6 +114,7 @@ import Combine
     // the extension is writing, and acknowledge only after both stores are durable.
     func importShares(from directory: URL, drafts: DraftStore) -> [Draft] {
         guard loaded, drafts.loaded else { return [] }
+        if let error = drafts.categorySettingsError { storageError = error; return [] }
         var created: [Draft] = []
         do {
             guard FileManager.default.fileExists(atPath: directory.path) else { return [] }
@@ -124,14 +125,14 @@ import Combine
             }
             for file in files {
                 let request = try JSONDecoder().decode(SharedMusicRequest.self, from: Data(contentsOf: file))
-                guard SharedMusicLink.youtube(request.item.youtubeURL) != nil else {
+                guard SharedMusicLink.parse(request.item.youtubeURL) != nil else {
                     storageError = "共有された曲のURLを読み取れません。共有データは保持しています。"; continue
                 }
                 var item = request.item; item.id = request.id
                 if !storedItems.contains(where: { $0.id == item.id }), !update(item) { break }
                 if request.createArticle {
                     if !drafts.drafts.contains(where: { $0.id == request.id }) {
-                        var article = Draft(kind: .music); article.id = request.id
+                        var article = drafts.newDraft(kind: .music); article.id = request.id
                         article.title = request.articleTitle; article.body = request.introduction
                         article.tags = "曲紹介"; article.music = Self.articleCopies([item])
                         guard drafts.update(article) else { break }

@@ -313,11 +313,31 @@ actor GitHubPublisher {
         guard response.statusCode == 200 else { throw failure(response.statusCode) }
         return data
     }
-    func publishedArticles(token: String) async throws -> [Draft] {
+    func articleDirectories(token: String) async throws -> [String] {
+        let tree = try JSONDecoder().decode(Tree.self, from: await readAPI(["git", "trees", configuration.branch], token: token, recursive: true))
+        guard !tree.truncated else { throw WriterError.message("保存先を全件取得できませんでした。設定は変更していません。") }
+        let directories = tree.tree.filter {
+            $0.type == "blob" && profile.articleExtensions.contains(($0.path as NSString).pathExtension.lowercased()) &&
+            !profile.excludedArticleNames.contains(($0.path as NSString).lastPathComponent)
+        }.map { ($0.path as NSString).deletingLastPathComponent }
+        // Discovery proposes directories only; users choose which contain articles.
+        return Set(directories.filter { BlogProfile.safePath($0, allowEmpty: true) }).sorted()
+    }
+    func publishedArticles(token: String, categories: [ArticleCategory]? = nil, knownArticles: [Draft] = []) async throws -> [Draft] {
+        if let categories { try ArticleCategory.validate(categories) }
+        let targets = categories?.sorted { $0.id.count > $1.id.count }
         let tree = try JSONDecoder().decode(Tree.self, from: await readAPI(["git", "trees", configuration.branch], token: token, recursive: true))
         guard !tree.truncated else { throw WriterError.message("記事一覧を全件取得できませんでした。端末の内容は変更していません。") }
         var articles: [Draft] = []
-        for entry in tree.tree where entry.type == "blob" && RepositoryArticleMarkdown.validPath(entry.path, profile: profile) {
+        var savedProfiles: [String: Draft] = [:]
+        for article in knownArticles where article.supportsCurrentProfile && (article.remoteDestination == nil || article.remoteDestination == configuration.destinationID) {
+            savedProfiles[article.path] = article
+        }
+        for entry in tree.tree where entry.type == "blob" {
+            let category = targets?.first { $0.containsDirectory(of: entry.path) }
+            let saved = savedProfiles[entry.path]
+            let articleProfile = saved?.profile ?? category?.profile ?? profile
+            guard targets == nil || category?.isEnabled == true, RepositoryArticleMarkdown.validPath(entry.path, profile: articleProfile) else { continue }
             // Reading blobs by SHA keeps every body consistent with this tree,
             // even if another client changes main during the refresh.
             guard entry.sha.count == 40, entry.sha.allSatisfy({ $0.isHexDigit }) else { throw WriterError.message("記事のバージョンを確認できません。") }
@@ -326,7 +346,12 @@ actor GitHubPublisher {
                   let bytes = Data(base64Encoded: encoded, options: .ignoreUnknownCharacters), let markdown = String(data: bytes, encoding: .utf8) else {
                 throw WriterError.message("記事「\(entry.path)」の本文を取得できません。")
             }
-            var article = try RepositoryArticleMarkdown.decode(path: entry.path, sha: entry.sha, markdown: markdown, profile: profile, configuration: configuration)
+            var article = try RepositoryArticleMarkdown.decode(path: entry.path, sha: entry.sha, markdown: markdown, profile: articleProfile, configuration: configuration)
+            if let category {
+                article.categoryBaseProfile = saved?.categoryBaseProfile ?? .current
+                article.categoryName = saved?.categoryName ?? category.name
+                article.articleSettingsVersion = saved?.articleSettingsVersion ?? 1
+            }
             article.remoteDestination = configuration.destinationID
             articles.append(article)
         }
@@ -340,6 +365,8 @@ actor GitHubPublisher {
             throw WriterError.message("GitHubの最新記事を取得できません。端末の編集中の内容は残っています。")
         }
         var article = try RepositoryArticleMarkdown.decode(path: draft.path, sha: remote.sha, markdown: markdown, profile: profile, configuration: configuration)
+        article.categoryBaseProfile = draft.categoryBaseProfile; article.categoryName = draft.categoryName
+        article.articleSettingsVersion = draft.articleSettingsVersion
         article.remoteDestination = configuration.destinationID
         return article
     }

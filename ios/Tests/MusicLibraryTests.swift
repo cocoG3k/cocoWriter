@@ -9,6 +9,23 @@ final class MusicLibraryTests: XCTestCase {
         XCTAssertNil(SharedMusicLink.extract("https://user@music.youtube.com/watch?v=abcdefghijk"))
         XCTAssertNil(SharedMusicLink.extract("普通のテキスト"))
     }
+    @MainActor func testAppleAmazonAndShortSharesKeepLegacyStorageKey() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let inbox = folder.appendingPathComponent("inbox")
+        let library = MusicLibraryStore(url: folder.appendingPathComponent("music.json"))
+        let drafts = DraftStore(url: folder.appendingPathComponent("drafts.json"))
+        let sources = ["https://music.apple.com/jp/album/song/1053933969?i=1053934844", "https://music.amazon.co.jp/albums/B084KP4NBH?trackAsin=B084KPC3Q7", "https://amzn.to/3v5N2DO"]
+        for raw in sources {
+            var item = MusicItem(); item.youtubeURL = raw
+            try MusicShareInbox.save(SharedMusicRequest(item: item, createArticle: true), to: inbox)
+        }
+        XCTAssertEqual(library.importShares(from: inbox, drafts: drafts).count, 3)
+        XCTAssertEqual(Set(library.items.map(\.youtubeURL)), Set(sources))
+        XCTAssertEqual(Set(DraftStore(url: folder.appendingPathComponent("drafts.json")).drafts.flatMap(\.music).map(\.youtubeURL)), Set(sources))
+        XCTAssertEqual(MusicLibraryStore(url: folder.appendingPathComponent("music.json")).items.count, 3)
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: inbox.path).isEmpty)
+    }
     @MainActor func testMigrationPersistsOnceAndCopiesRemainIndependent() throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: folder) }
@@ -126,6 +143,23 @@ final class MusicLibraryTests: XCTestCase {
         article.remoteSHA = "v2"; article.pendingMarkdown = nil
         XCTAssertTrue(drafts.update(article)); XCTAssertTrue(library.reconcile(from: drafts))
         XCTAssertEqual(library.items, [first])
+    }
+    @MainActor func testSongAddedToImportedDiaryReservesBothOldAndNewStock() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let library = MusicLibraryStore(url: folder.appendingPathComponent("music.json"))
+        let drafts = DraftStore(url: folder.appendingPathComponent("drafts.json"))
+        var first = MusicItem(); first.title = "元の曲"
+        var second = MusicItem(); second.title = "日記に加えた曲"
+        XCTAssertTrue(library.update(first)); XCTAssertTrue(library.update(second))
+        var article = Draft(kind: .diary); article.music = MusicLibraryStore.articleCopies([first]); article.remoteSHA = "v1"
+        XCTAssertTrue(drafts.update(article)); XCTAssertTrue(library.reconcile(from: drafts)); XCTAssertEqual(library.items, [second])
+        article.music = MusicLibraryStore.articleCopies([second]); article.remoteSHA = "v2"
+        article.repositorySource = RepositorySource(markdown: article.markdown, title: article.title, description: article.description, date: article.date, tags: article.tags)
+        XCTAssertTrue(drafts.update(article)); XCTAssertTrue(library.reconcile(from: drafts)); XCTAssertTrue(library.items.isEmpty)
+        article.remoteSHA = nil
+        XCTAssertTrue(drafts.update(article)); XCTAssertTrue(library.reconcile(from: drafts))
+        XCTAssertEqual(Set(library.items.map(\.id)), Set([first.id, second.id]))
     }
     @MainActor func testSharedSongReturnsOnlyAfterAllPublishedArticlesBecomeDrafts() throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

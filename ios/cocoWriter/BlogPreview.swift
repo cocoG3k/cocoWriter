@@ -7,8 +7,8 @@ enum BlogPreviewHTML {
         text.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;").replacingOccurrences(of: "\"", with: "&quot;")
     }
-    static func renderMarkdown(_ text: String, imageSources: [String: String] = [:], configuration: SiteConfiguration = .current) -> String {
-        var renderer = Renderer(imageSources: imageSources, configuration: configuration)
+    static func renderMarkdown(_ text: String, imageSources: [String: String] = [:], configuration: SiteConfiguration = .current, profile: BlogProfile = .current) -> String {
+        var renderer = Renderer(imageSources: imageSources, configuration: configuration, profile: profile)
         return renderer.visit(Document(parsing: text, options: [.disableSmartOpts]))
     }
     static func document(_ draft: Draft, imageFiles: ArticleImageFiles = ArticleImageFiles(), configuration: SiteConfiguration = .current, template: String? = nil) -> String {
@@ -27,8 +27,8 @@ enum BlogPreviewHTML {
                 imageSources[image.publicPath] = "data:image/jpeg;base64," + data.base64EncodedString()
             }
         }
-        var content = renderMarkdown(draft.body, imageSources: imageSources, configuration: configuration)
-        if draft.kind == .music {
+        var content = renderMarkdown(draft.body, imageSources: imageSources, configuration: configuration, profile: draft.profile)
+        if !draft.music.isEmpty {
             for item in draft.music {
                 let heading = [item.artist, item.title].filter { !$0.isEmpty }.joined(separator: " - ")
                 content += "<h3>\(escape(heading))</h3>"
@@ -37,7 +37,7 @@ enum BlogPreviewHTML {
                 } else {
                     content += "<div class=\"preview-placeholder\">Spotifyのリンクを確認すると、ここにプレイヤーが表示されます。</div>"
                 }
-                content += renderMarkdown(item.comment, imageSources: imageSources, configuration: configuration)
+                content += renderMarkdown(item.comment, imageSources: imageSources, configuration: configuration, profile: draft.profile)
             }
         }
         let theme = template ?? Bundle.main.url(forResource: "BlogPreviewTemplate", withExtension: "html")
@@ -82,6 +82,7 @@ enum BlogPreviewHTML {
         typealias Result = String
         var imageSources: [String: String] = [:]
         var configuration: SiteConfiguration
+        var profile: BlogProfile
         mutating func children(_ node: Markup) -> String { node.children.map { visit($0) }.joined() }
         mutating func tag(_ name: String, _ node: Markup) -> String { "<\(name)>\(children(node))</\(name)>" }
         mutating func defaultVisit(_ markup: Markup) -> String { children(markup) }
@@ -112,7 +113,7 @@ enum BlogPreviewHTML {
             guard let source = node.source else { return escape(node.plainText) }
             let resolved: String
             if let local = imageSources[source] { resolved = local }
-            else if let url = configuration.previewAssetURL(for: source) { resolved = url.absoluteString }
+            else if let url = configuration.previewAssetURL(for: source, profile: profile) { resolved = url.absoluteString }
             else { return escape(node.plainText) }
             return "<img src=\"\(escape(resolved))\" alt=\"\(escape(node.plainText))\">"
         }

@@ -18,6 +18,8 @@ struct MarkdownFile: FileDocument {
     @State private var choosingMusic = false
     @State private var preview = false
     @State private var expandedBody = false
+    @State private var composingMusic = false
+    @State private var pendingEditorAction: EditorAttachmentAction?
     @State private var exporting = false
     @State private var exportingBundle = false
     @State private var bundleFile: ArticleBundle?
@@ -28,7 +30,7 @@ struct MarkdownFile: FileDocument {
     @State private var files = false
     @State private var showReloadConfirmation = false
     @State private var message: String?
-    private var publisher: GitHubPublisher { GitHubPublisher(configuration: store.site) }
+    private var publisher: GitHubPublisher { GitHubPublisher(configuration: store.site, profile: draft.publicationProfile) }
     var body: some View {
         Form {
             Group {
@@ -45,17 +47,43 @@ struct MarkdownFile: FileDocument {
                 }
                 Group {
                     Section("記事") {
+                        if draft.canChangeCategory {
+                            Picker("カテゴリ", selection: Binding(get: { draft.profile.articleDirectory }, set: { directory in
+                                guard let category = store.enabledCategories.first(where: { $0.id == directory }) else { return }
+                                do { try draft.selectCategory(category, configuration: store.site) }
+                                catch { message = error.localizedDescription }
+                            })) {
+                                if !store.enabledCategories.contains(where: { $0.id == draft.profile.articleDirectory }) {
+                                    Text(store.categoryLabel(for: draft) + "（現在の保存先）").tag(draft.profile.articleDirectory)
+                                }
+                                ForEach(store.enabledCategories) { category in Text(category.name).tag(category.id) }
+                            }.accessibilityIdentifier("article-category")
+                        } else {
+                            LabeledContent("カテゴリ", value: store.categoryLabel(for: draft))
+                        }
                         TextField("タイトル", text: $draft.title, axis: .vertical).font(.headline)
                         TextField("一覧に表示する説明文", text: $draft.description, axis: .vertical)
                         DatePicker("記事の日付", selection: $draft.date, displayedComponents: .date).environment(\.locale, Locale(identifier: "ja_JP"))
                         TextField("タグ（カンマ区切り）", text: $draft.tags)
+                        if !store.tagSuggestions.isEmpty {
+                            Menu {
+                                ForEach(store.tagSuggestions, id: \.self) { tag in
+                                    Button { draft.tags = ArticleTags.toggling(tag, in: draft.tags) } label: {
+                                        Label(tag, systemImage: RepositoryArticleMarkdown.tagValues(draft.tags).contains(tag) ? "checkmark" : "plus")
+                                    }
+                                }
+                            } label: { Label("タグ候補から選ぶ", systemImage: "tag") }
+                                .accessibilityIdentifier("article-select-tags")
+                        }
                     }
-                    Section(draft.kind == .music && draft.repositorySource == nil ? "はじめに" : "本文 · Markdown") {
-                        MarkdownEditor(text: $draft.body, minHeight: 150)
+                    Section("本文 · Markdown") {
+                        MarkdownEditor(text: $draft.body, minHeight: 150,
+                                       onAddMusic: { requestEditorAction(.music) }, onChooseMusic: { requestEditorAction(.stock) },
+                                       onAddPhoto: { requestEditorAction(.photo) }, onAddImageFile: { requestEditorAction(.imageFile) })
                         Button { expandedBody = true } label: { Label("本文を広く開く", systemImage: "arrow.up.left.and.arrow.down.right") }
                     }
-                    ArticleImagesSection(draft: $draft, importing: $importingImage, photos: $photos, files: $files, message: $message)
-                    if draft.kind == .music && draft.repositorySource == nil {
+                    if !draft.attachedImages.isEmpty { ArticleImagesSection(draft: $draft, importing: $importingImage, photos: $photos, files: $files, message: $message) }
+                    if !draft.music.isEmpty {
                         Section {
                             ForEach(draft.music) { item in
                                 VStack(alignment: .leading) {
@@ -73,9 +101,11 @@ struct MarkdownFile: FileDocument {
                                 .onDelete { draft.music.remove(atOffsets: $0) }
                             Button { choosingMusic = true } label: { Label("ストックから選ぶ", systemImage: "music.note.list") }
                                 .accessibilityIdentifier("music-choose-stock")
-                            Button { draft.music.append(MusicItem()) } label: { Label("曲・アルバムを追加", systemImage: "plus.circle") }
+                            Button { composingMusic = true } label: { Label("曲・アルバムを追加", systemImage: "plus.circle") }
                                 .accessibilityIdentifier("music-add-item")
-                        } header: { Text("曲・アルバム（掲載順）") } footer: { Text("各項目の「削除」で消せます。編集ボタンで並べ替えできます。") }
+                        } header: { Text("曲紹介") } footer: {
+                            Text("曲紹介は本文のあとに掲載します。各項目で削除でき、編集ボタンで並べ替えできます。")
+                        }
                     }
                 }.disabled(publishing || draft.hasPendingOperation)
                 Section {
@@ -101,10 +131,10 @@ struct MarkdownFile: FileDocument {
         .environment(\.defaultMinListRowHeight, 36)
         .font(.subheadline)
         .scrollDismissesKeyboard(.interactively)
-        .writerChrome().navigationTitle(draft.kind.label).navigationBarTitleDisplayMode(.inline)
+        .writerChrome().navigationTitle(draft.isPublished ? "記事を編集" : "記事を書く").navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("閉じる") { if store.update(draft) { dismiss() } }.disabled(publishing || importingImage) }
-            ToolbarItem(placement: .primaryAction) { if draft.kind == .music && draft.repositorySource == nil { EditButton().disabled(publishing || draft.hasPendingOperation) } }
+            ToolbarItem(placement: .primaryAction) { if !draft.music.isEmpty { EditButton().disabled(publishing || draft.hasPendingOperation) } }
         }
         .interactiveDismissDisabled(publishing || importingImage || store.storageError != nil)
         .onChange(of: draft) { _, value in _ = store.update(value) }
@@ -142,12 +172,17 @@ struct MarkdownFile: FileDocument {
         .sheet(isPresented: $choosingMusic) {
             MusicLibraryPicker(existing: draft.music) { draft.music.append(contentsOf: MusicLibraryStore.articleCopies($0)) }
         }
+        .sheet(isPresented: $composingMusic) { ArticleMusicComposer { draft.music.append($0) } }
         .sheet(isPresented: $preview) { PreviewView(draft: draft) }
-        .sheet(isPresented: $expandedBody) {
+        .sheet(isPresented: $expandedBody, onDismiss: {
+            if let action = pendingEditorAction { pendingEditorAction = nil; requestEditorAction(action) }
+        }) {
             NavigationStack {
-                MarkdownEditor(text: $draft.body, identifier: "expanded-body-editor", minHeight: 280)
+                MarkdownEditor(text: $draft.body, identifier: "expanded-body-editor", minHeight: 280,
+                               onAddMusic: { requestEditorAction(.music) }, onChooseMusic: { requestEditorAction(.stock) },
+                               onAddPhoto: { requestEditorAction(.photo) }, onAddImageFile: { requestEditorAction(.imageFile) })
                     .padding(16).background(WriterPalette.background)
-                    .writerChrome().navigationTitle(draft.kind == .music && draft.repositorySource == nil ? "はじめにを書く" : "本文を書く").navigationBarTitleDisplayMode(.inline)
+                    .writerChrome().navigationTitle("本文を書く").navigationBarTitleDisplayMode(.inline)
                     .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完了") { expandedBody = false } } }
             }
         }
@@ -175,6 +210,17 @@ struct MarkdownFile: FileDocument {
         .confirmationDialog("端末の編集を別の下書きに残して、GitHubの最新記事を読み込みますか？", isPresented: $showReloadConfirmation, titleVisibility: .visible) {
             Button("控えを残して読み込む") { Task { await loadLatest() } }
             Button("キャンセル", role: .cancel) { }
+        }
+    }
+    private enum EditorAttachmentAction { case music, stock, photo, imageFile }
+    private func requestEditorAction(_ action: EditorAttachmentAction) {
+        guard !publishing, !importingImage, !draft.hasPendingOperation else { return }
+        if expandedBody { pendingEditorAction = action; expandedBody = false; return }
+        switch action {
+        case .music: composingMusic = true
+        case .stock: choosingMusic = true
+        case .photo: photos = true
+        case .imageFile: files = true
         }
     }
     private func addImage(_ prepared: PreparedImage, live: Bool) {
@@ -251,8 +297,35 @@ struct MarkdownFile: FileDocument {
         } catch { message = error.localizedDescription }
     }
 }
+@MainActor private struct ArticleMusicComposer: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var item = MusicItem()
+    let onAdd: (MusicItem) -> Void
+    private var hasContent: Bool {
+        [item.title, item.artist, item.youtubeURL, item.spotifyURL, item.comment]
+            .contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    MusicItemEditor(item: $item, showsDelete: false) { }
+                } footer: { Text("記事に追加したあとも編集できます。曲紹介は本文のあとに掲載します。") }
+            }.writerCanvas().writerChrome().navigationTitle("曲紹介を書く").navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("キャンセル") { dismiss() } }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("記事に追加") { onAdd(item); dismiss() }.disabled(!hasContent)
+                            .accessibilityIdentifier("music-composer-add")
+                    }
+                }
+        }
+    }
+}
+
 @MainActor struct MusicItemEditor: View {
     @Binding var item: MusicItem
+    var showsDelete = true
     let onDelete: () -> Void
     @State private var resolving = false
     @State private var candidates: [MusicCandidate] = []
@@ -262,22 +335,27 @@ struct MarkdownFile: FileDocument {
     @State private var showingSpotifyPicker = false
     @State private var manualSpotifyURL = ""
     private var lookupKey: String { item.youtubeURL.trimmingCharacters(in: .whitespacesAndNewlines) + "|\(retry)" }
+    private var sourceMessage: String? {
+        guard !item.youtubeURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        guard let source = SharedMusicLink.parse(item.youtubeURL) else { return "対応する曲の共有URLを入力してください。手入力・Spotify検索・URL貼り付けでも続けられます。" }
+        return source.issue
+    }
     private var selectedCandidate: MusicCandidate? { candidates.first { $0.id == item.spotifyURL } }
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 TextField("曲・アルバム名", text: $item.title).font(.headline)
-                Button(role: .destructive, action: onDelete) {
+                if showsDelete { Button(role: .destructive, action: onDelete) {
                     Label("削除", systemImage: "trash").font(.caption)
                         .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
                 }.accessibilityLabel(item.title.isEmpty ? "この曲・アルバムを削除" : "\(item.title)を削除")
-                    .accessibilityIdentifier("music-delete-\(item.id)")
+                    .accessibilityIdentifier("music-delete-\(item.id)") }
             }
             TextField("アーティスト", text: $item.artist)
-            TextField("YouTube Music の共有 URL（任意）", text: $item.youtubeURL).textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
-            if !item.youtubeURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, MusicLink.youtube(item.youtubeURL) == nil {
-                Text("YouTube Musicの曲URLを入力してください。").font(.caption).foregroundStyle(.red)
-            }
+            TextField("音楽サービスの曲の共有 URL（任意）", text: $item.youtubeURL).textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+            Text("YouTube Music・Apple Music・Amazon Musicに対応。曲名・アーティストの手入力でも続けられます。").font(.caption).foregroundStyle(WriterPalette.secondary)
+            if let message = sourceMessage { Text(message).font(.caption).foregroundStyle(.red) }
+            if let resolutionMessage { Text(resolutionMessage).font(.caption).foregroundStyle(WriterPalette.secondary) }
             spotifySelection
             Text("この音についてのコメント").font(.caption).foregroundStyle(WriterPalette.secondary)
             MarkdownEditor(text: $item.comment, identifier: "music-comment-\(item.id)", minHeight: 100)
@@ -372,7 +450,7 @@ struct MarkdownFile: FileDocument {
                                 }.padding(.vertical, 6)
                             }
                         } else if !resolving {
-                            Text(resolutionMessage ?? "YouTube Musicの曲URLから候補を探せます。Spotifyで検索するか、共有URLを貼り付けても選べます。")
+                            Text(resolutionMessage ?? "YouTube Music・Apple Music・Amazon Musicの曲URLから候補を探せます。Spotifyで検索するか、共有URLを貼り付けても選べます。")
                                 .font(.subheadline).foregroundStyle(WriterPalette.secondary)
                         }
                     } header: {
@@ -408,10 +486,10 @@ struct MarkdownFile: FileDocument {
                                 showingSpotifyPicker = false
                             }.disabled(SpotifyLink(manualSpotifyURL) == nil).accessibilityIdentifier("music-use-manual-spotify")
                         } label: { Text("SpotifyのURLを貼り付ける").accessibilityIdentifier("music-manual-spotify") }
-                        if let youtube = MusicLink.youtube(item.youtubeURL) {
+                        if let source = SharedMusicLink.parse(item.youtubeURL) {
                             Button { retry += 1 } label: { Label("候補を再取得", systemImage: "arrow.clockwise") }
                                 .disabled(resolving).accessibilityIdentifier("music-refresh-candidates")
-                            Link("YouTube Musicで開く", destination: youtube).accessibilityIdentifier("music-open-youtube")
+                            Link("\(source.service.name)で開く", destination: source.url).accessibilityIdentifier("music-open-source")
                         }
                     }
                 }.listRowBackground(WriterPalette.surface)
@@ -430,8 +508,8 @@ struct MarkdownFile: FileDocument {
         let generation = UUID()
         requestGeneration = generation; candidates = []; resolutionMessage = nil; resolving = false
         let originalURL = item.youtubeURL
-        guard let url = MusicLink.youtube(originalURL) else { return }
-        guard MusicLink.videoID(url) != nil else { resolutionMessage = "プレイリストの一括変換には対応していません。曲の共有URLを貼り付けてください。"; return }
+        guard let source = SharedMusicLink.parse(originalURL), source.issue == nil else { return }
+        let url = source.url
         do {
             try await Task.sleep(nanoseconds: 700_000_000)
             guard requestGeneration == generation, item.youtubeURL == originalURL else { return }
@@ -489,6 +567,13 @@ struct MarkdownFile: FileDocument {
                         Text("記事・メモは端末内に保存します。クラウド同期はありません。アプリを削除すると失われるため、大切な記事はMarkdownを書き出してください。").font(.caption).foregroundStyle(WriterPalette.secondary)
                     }
                     Section {
+                        NavigationLink { ArticleCategoriesSettingsView() } label: { Label("記事のカテゴリ・タグ", systemImage: "folder") }
+                            .accessibilityIdentifier("settings-article-categories")
+                        Text("使用中: " + store.enabledCategories.map(\.name).joined(separator: "、"))
+                            .font(.caption).foregroundStyle(WriterPalette.secondary)
+                        if let error = store.categorySettingsError { Text(error).font(.caption).foregroundStyle(.red) }
+                    } footer: { Text("カテゴリごとの保存先・記事形式・項目名と、タグ候補を設定できます。書く記事のカテゴリは記事作成画面で選びます。") }
+                    Section {
                         DisclosureGroup("GitHub公開の接続設定") {
                             TextField("GitHubユーザー名・組織名", text: $connection.owner)
                                 .textInputAutocapitalization(.never).autocorrectionDisabled()
@@ -500,7 +585,7 @@ struct MarkdownFile: FileDocument {
                                 .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
                             TextField("サイト名", text: $connection.title)
                             TextField("サイトの説明", text: $connection.tagline)
-                            Text("記事: \(BlogProfile.current.articleDirectory.isEmpty ? "リポジトリ直下" : BlogProfile.current.articleDirectory)\n写真: \(BlogProfile.current.imageDirectory)\n画像公開パス: \(BlogProfile.current.imagePublicPath)\nヘッダー: \(BlogProfile.current.frontMatter.format.rawValue.uppercased())\nプロジェクトサイトのURLには /リポジトリ名/ を含めます。")
+                            Text("記事と画像の保存先・記事形式は「記事のカテゴリ・タグ」で設定できます。プロジェクトサイトのURLには /リポジトリ名/ を含めます。")
                                 .font(.caption).foregroundStyle(WriterPalette.secondary)
                             if store.hasConnectedArticles {
                                 Text("投稿済み・確認待ちの記事がある間は、ユーザー名・リポジトリ・ブランチを変更できません。")
@@ -537,5 +622,336 @@ struct MarkdownFile: FileDocument {
                 .onAppear { connection = store.site }
                 .onDisappear { token = "" }
         }
+    }
+}
+
+@MainActor struct ArticleCategoriesSettingsView: View {
+    @EnvironmentObject private var store: DraftStore
+    @State private var categories: [ArticleCategory] = []
+    @State private var editing: ArticleCategory?
+    @State private var discovering = false
+    @State private var message: String?
+    @State private var initialized = false
+    @State private var tags: [String] = []
+    @State private var newTag = ""
+    @State private var tagMessage: String?
+    var body: some View {
+        Form {
+            Section {
+                ForEach(categories) { category in
+                    HStack {
+                        Button { toggle(category) } label: {
+                            Image(systemName: category.isEnabled ? "checkmark.circle.fill" : "circle")
+                                .font(.title3).frame(width: 32, height: 36)
+                        }.buttonStyle(.borderless).accessibilityLabel(category.name + "を" + (category.isEnabled ? "使わない" : "使う"))
+                            .accessibilityIdentifier("category-toggle-" + category.id)
+                        Button { editing = category } label: {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(category.name).foregroundStyle(WriterPalette.text)
+                                Text(category.id.isEmpty ? "リポジトリ直下" : category.id).font(.caption).foregroundStyle(WriterPalette.secondary)
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+                        }.buttonStyle(.borderless)
+                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                    }
+                }
+                Button {
+                    var profile = categories.first(where: \.isEnabled)?.profile ?? BlogProfile.current; profile.articleDirectory = ""
+                    editing = ArticleCategory(name: "", profile: profile)
+                } label: { Label("カテゴリを追加", systemImage: "plus.circle") }
+                    .accessibilityIdentifier("category-add")
+                Button { Task { await discover() } } label: {
+                    HStack { Label("GitHubから保存先を探す", systemImage: "arrow.clockwise"); if discovering { Spacer(); ProgressView() } }
+                }.disabled(discovering || store.site.connectionError != nil)
+                    .accessibilityIdentifier("category-discover")
+            } header: { Text("カテゴリ · 保存先フォルダ") } footer: {
+                Text("チェックしたカテゴリを記事作成画面に表示します。一覧の先頭が新しい下書きの初期カテゴリです。公開済みの記事の保存先は変わりません。")
+            }
+            Section {
+                if categories.contains(where: \.isEnabled) {
+                    Picker("新しい下書きのカテゴリ", selection: Binding(get: { categories.first(where: \.isEnabled)?.id ?? "" }, set: { directory in
+                        guard let index = categories.firstIndex(where: { $0.id == directory }) else { return }
+                        let category = categories.remove(at: index); categories.insert(category, at: 0)
+                    })) {
+                        ForEach(categories.filter(\.isEnabled)) { category in Text(category.name).tag(category.id) }
+                    }.accessibilityIdentifier("category-default")
+                }
+                Text("カテゴリ名を開くと、記事・画像の保存先、記事形式、項目名を編集できます。変更は新しい記事に使い、保存済みの記事は元の設定を保ちます。")
+                    .font(.caption).foregroundStyle(WriterPalette.secondary)
+                Button("カテゴリ設定を保存") { save() }.disabled(discovering)
+                    .accessibilityIdentifier("category-save")
+                if let message { Text(message).font(.caption).foregroundStyle(WriterPalette.secondary) }
+            }
+            Section {
+                ForEach(tags, id: \.self) { tag in
+                    HStack {
+                        Label(tag, systemImage: "tag")
+                        Spacer()
+                        Button(role: .destructive) { tags.removeAll { $0 == tag } } label: { Image(systemName: "trash") }
+                            .buttonStyle(.borderless).accessibilityLabel(tag + "を候補から削除")
+                    }
+                }
+                HStack {
+                    TextField("タグを一つ追加（例: 散歩）", text: $newTag)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .accessibilityIdentifier("tag-new")
+                    Button { addTag() } label: { Image(systemName: "plus.circle") }
+                        .buttonStyle(.borderless).accessibilityLabel("タグ候補を追加")
+                        .disabled(newTag.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+                Button("タグ候補を保存") { saveTags() }.accessibilityIdentifier("tag-save")
+                if let tagMessage { Text(tagMessage).font(.caption).foregroundStyle(WriterPalette.secondary) }
+            } header: { Text("タグ · 記事につけるラベル") } footer: {
+                Text("記事作成画面から複数選べる候補です。記事ごとの自由入力もできます。タグを選んでも保存先フォルダは変わりません。候補を削除しても、既存の記事のタグは残ります。")
+            }
+        }.writerCanvas().writerChrome().navigationTitle("カテゴリとタグ").navigationBarTitleDisplayMode(.inline)
+            .disabled(store.remoteOperations > 0 && !discovering)
+            .onAppear { if !initialized { categories = store.categories; tags = store.tagSuggestions; initialized = true } }
+            .sheet(item: $editing) { category in
+                ArticleCategoryEditor(category: category) { updated in
+                    if let index = categories.firstIndex(where: { $0.id == category.id && $0.name == category.name }) { categories[index] = updated }
+                    else { categories.append(updated) }
+                }
+            }
+    }
+    private func toggle(_ category: ArticleCategory) {
+        if let index = categories.firstIndex(where: { $0.id == category.id }) { categories[index].isEnabled.toggle() }
+    }
+    private func save() {
+        do { try store.saveCategories(categories); categories = store.categories; message = "カテゴリ設定を保存しました。" }
+        catch { message = error.localizedDescription }
+    }
+    private func addTag() {
+        do { tags = try ArticleTags.normalized(tags + [newTag]); newTag = ""; tagMessage = nil }
+        catch { tagMessage = error.localizedDescription }
+    }
+    private func saveTags() {
+        do {
+            let values = newTag.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? tags : tags + [newTag]
+            try store.saveTagSuggestions(values); tags = store.tagSuggestions; newTag = ""; tagMessage = "タグ候補を保存しました。"
+        } catch { tagMessage = error.localizedDescription }
+    }
+    private func discover() async {
+        guard !discovering else { return }
+        discovering = true; message = nil; store.beginRemoteOperation()
+        defer { discovering = false; store.endRemoteOperation() }
+        do {
+            let directories = try await GitHubPublisher(configuration: store.site).articleDirectories(token: (try? TokenVault.read()) ?? "")
+            var added = 0
+            for directory in directories where !categories.contains(where: { $0.id == directory }) {
+                var profile = categories.first(where: \.isEnabled)?.profile ?? BlogProfile.current; profile.articleDirectory = directory
+                categories.append(ArticleCategory(name: ArticleCategory.suggestedName(for: directory), profile: profile, isEnabled: false)); added += 1
+            }
+            message = added == 0 ? "追加できる保存先はありませんでした。新しいフォルダは「カテゴリを追加」で登録できます。" : "\(added)件の保存先を追加しました。記事が入るフォルダにチェックを付けて保存してください。写真の保存先も必要に応じて確認できます。"
+        } catch { message = error.localizedDescription }
+    }
+}
+
+@MainActor private struct ArticleCategoryEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    @State var category: ArticleCategory
+    let onSave: (ArticleCategory) -> Void
+    @State private var message: String?
+    @State private var editingField: ArticleFixedField?
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("名前（例: 日記、旅）", text: $category.name).accessibilityIdentifier("category-name")
+                    TextField("記事の保存先（例: src/content/journey）", text: $category.profile.articleDirectory)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .accessibilityIdentifier("category-directory")
+                    Toggle("このカテゴリを使う", isOn: $category.isEnabled)
+                } header: { Text("カテゴリ") } footer: { Text("リポジトリ内のフォルダを指定します。空欄はリポジトリ直下です。保存先を変えても、既存の記事は移動しません。") }
+                Section {
+                    TextField("画像の保存フォルダ", text: $category.profile.imageDirectory)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .accessibilityIdentifier("category-image-directory")
+                    TextField("画像の公開パス（例: /images/journey）", text: $category.profile.imagePublicPath)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .accessibilityIdentifier("category-image-public-path")
+                    Picker("画像リンクの形式", selection: $category.profile.imageReferenceStyle) {
+                        Text("サイト内のパス").tag(BlogProfile.ImageReferenceStyle.siteRelative)
+                        Text("サイトURLを含める").tag(BlogProfile.ImageReferenceStyle.absolute)
+                    }
+                } header: { Text("画像の保存先") } footer: { Text("公開サイトの構成に合わせて指定します。既存の画像は元の保存先・リンクを保ちます。") }
+                ArticleFormatSettingsEditor(profile: $category.profile) { editingField = $0 }
+                if let message { Section { Text(message).foregroundStyle(.red).font(.caption) } }
+            }.writerCanvas().writerChrome().navigationTitle("カテゴリの設定").navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("キャンセル") { dismiss() } }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("完了") {
+                            do {
+                                category.name = category.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                                category.profile.articleDirectory = category.profile.articleDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+                                category.profile.imageDirectory = category.profile.imageDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+                                category.profile.imagePublicPath = category.profile.imagePublicPath.trimmingCharacters(in: .whitespacesAndNewlines)
+                                guard !category.name.isEmpty else { throw WriterError.message("カテゴリ名を入力してください。") }
+                                try category.profile.validate(); onSave(category); dismiss()
+                            } catch { message = error.localizedDescription }
+                        }
+                    }
+                }
+        }.sheet(item: $editingField) { field in
+            ArticleFixedFieldEditor(field: field) { key, value in
+                var updated = category.profile
+                if let original = field.originalKey { updated.frontMatter.extra.removeValue(forKey: original) }
+                guard updated.frontMatter.extra[key] == nil else { throw WriterError.message("同じ名前の固定項目があります。") }
+                updated.frontMatter.extra[key] = value
+                try updated.validate(); category.profile = updated
+            } onDelete: {
+                if let original = field.originalKey { category.profile.frontMatter.extra.removeValue(forKey: original) }
+            }
+        }
+    }
+}
+
+@MainActor private struct ArticleFormatSettingsEditor: View {
+    @Binding var profile: BlogProfile
+    @State private var excludedNames = ""
+    let onEditField: (ArticleFixedField) -> Void
+    var body: some View {
+        Group {
+            formatSection
+            fieldsSection
+            dateSection
+            fixedFieldsSection
+        }.onAppear { excludedNames = profile.excludedArticleNames.joined(separator: ", ") }
+    }
+    private var formatSection: some View {
+        Section {
+            Picker("ヘッダー形式", selection: $profile.frontMatter.format) {
+                Text("YAML").tag(BlogProfile.Format.yaml)
+                Text("TOML").tag(BlogProfile.Format.toml)
+                Text("JSON").tag(BlogProfile.Format.json)
+            }.accessibilityIdentifier("category-header-format")
+            TextField("ファイル名（例: ios-{id}.md）", text: $profile.filenameTemplate)
+                .textInputAutocapitalization(.never).autocorrectionDisabled()
+                .accessibilityIdentifier("category-filename")
+            Toggle(".md の記事を読み込む", isOn: extensionBinding("md"))
+            Toggle(".markdown の記事を読み込む", isOn: extensionBinding("markdown"))
+            TextField("一覧から除くファイル名（カンマ区切り）", text: $excludedNames)
+                .textInputAutocapitalization(.never).autocorrectionDisabled()
+                .onChange(of: excludedNames) { _, value in profile.excludedArticleNames = RepositoryArticleMarkdown.tagValues(value) }
+        } header: { Text("記事の形式") } footer: {
+            Text("ファイル名には重複を防ぐ {id} を一つ入れます。日付は {date}、{year}、{month}、{day} が使えます。")
+        }
+    }
+    private var fieldsSection: some View {
+        Section {
+            TextField("タイトルの項目名", text: $profile.frontMatter.fields.title).accessibilityIdentifier("category-title-field")
+            TextField("日付の項目名", text: $profile.frontMatter.fields.date).accessibilityIdentifier("category-date-field")
+            Toggle("説明文を保存する", isOn: Binding(get: { profile.frontMatter.fields.description != nil }, set: { enabled in
+                profile.frontMatter.fields.description = enabled ? "description" : nil
+                if !enabled { profile.frontMatter.requireDescription = false }
+            }))
+            if profile.frontMatter.fields.description != nil {
+                TextField("説明文の項目名", text: Binding(get: { profile.frontMatter.fields.description ?? "" }, set: { profile.frontMatter.fields.description = $0 }))
+                    .accessibilityIdentifier("category-description-field")
+                Toggle("説明文を必須にする", isOn: $profile.frontMatter.requireDescription)
+            }
+            Toggle("タグを保存する", isOn: Binding(get: { profile.frontMatter.fields.tags != nil }, set: { profile.frontMatter.fields.tags = $0 ? "tags" : nil }))
+            if profile.frontMatter.fields.tags != nil {
+                TextField("タグの項目名", text: Binding(get: { profile.frontMatter.fields.tags ?? "" }, set: { profile.frontMatter.fields.tags = $0 }))
+                    .accessibilityIdentifier("category-tags-field")
+            }
+        } header: { Text("ヘッダーの項目名") } footer: {
+            Text("サイトが使う名前に合わせます。例えば説明文が summary のサイトでは、説明文の項目名を summary にします。タグを保存しない設定でも、端末内の下書きには残ります。")
+        }.textInputAutocapitalization(.never).autocorrectionDisabled()
+    }
+    private var dateSection: some View {
+        Section {
+            Picker("日付の形式", selection: $profile.frontMatter.dateStyle) {
+                Text("年月日（2026-10-05）").tag(BlogProfile.DateStyle.date)
+                Text("日時（ISO 8601）").tag(BlogProfile.DateStyle.iso8601)
+                Text("日時（Jekyll）").tag(BlogProfile.DateStyle.jekyll)
+            }
+            TextField("タイムゾーン（例: Asia/Tokyo）", text: $profile.frontMatter.timeZone)
+                .textInputAutocapitalization(.never).autocorrectionDisabled()
+        } header: { Text("日付") }
+    }
+    private var fixedFieldsSection: some View {
+        Section {
+            ForEach(profile.frontMatter.extra.keys.sorted(), id: \.self) { key in
+                if let value = profile.frontMatter.extra[key] {
+                    Button { onEditField(ArticleFixedField(originalKey: key, key: key, value: value)) } label: {
+                        HStack { Text(key); Spacer(); Text(value.literal).font(.caption).foregroundStyle(WriterPalette.secondary).lineLimit(1); Image(systemName: "chevron.right").font(.caption) }
+                    }
+                }
+            }
+            Button { onEditField(ArticleFixedField(key: "", value: .string(""))) } label: { Label("固定項目を追加", systemImage: "plus.circle") }
+        } header: { Text("固定で付ける項目") } footer: {
+            Text("公開フラグなど、毎回同じ値を付ける項目です。変更した設定は、新しい記事に使います。プレビューの見た目はこのアプリのテーマを使います。")
+        }
+    }
+    private func extensionBinding(_ value: String) -> Binding<Bool> {
+        Binding(get: { profile.articleExtensions.contains(value) }, set: { enabled in
+            profile.articleExtensions.removeAll { $0 == value }
+            if enabled { profile.articleExtensions.append(value) }
+        })
+    }
+}
+
+private struct ArticleFixedField: Identifiable {
+    var id = UUID()
+    var originalKey: String?
+    var key: String
+    var value: BlogProfile.Value
+}
+
+@MainActor private struct ArticleFixedFieldEditor: View {
+    private enum ValueType: String, CaseIterable { case text = "文字列", flag = "オン・オフ", number = "数値", list = "文字列のリスト" }
+    @Environment(\.dismiss) private var dismiss
+    @State private var key: String
+    @State private var type: ValueType
+    @State private var text: String
+    @State private var flag: Bool
+    @State private var message: String?
+    private let existing: Bool
+    let onSave: (String, BlogProfile.Value) throws -> Void
+    let onDelete: () -> Void
+    init(field: ArticleFixedField, onSave: @escaping (String, BlogProfile.Value) throws -> Void, onDelete: @escaping () -> Void) {
+        _key = State(initialValue: field.key); existing = field.originalKey != nil
+        var initialType: ValueType = .text, initialText = "", initialFlag = false
+        switch field.value {
+        case .string(let value): initialText = value
+        case .bool(let value): initialType = .flag; initialFlag = value
+        case .number(let value): initialType = .number; initialText = String(value)
+        case .strings(let value): initialType = .list; initialText = value.joined(separator: "\n")
+        }
+        _type = State(initialValue: initialType); _text = State(initialValue: initialText); _flag = State(initialValue: initialFlag)
+        self.onSave = onSave; self.onDelete = onDelete
+    }
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("項目名（例: draft）", text: $key).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    Picker("値の種類", selection: $type) { ForEach(ValueType.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
+                    if type == .flag { Toggle("値（オン = true）", isOn: $flag) }
+                    else { TextField(type == .list ? "一行に一つずつ入力" : "値", text: $text, axis: .vertical).autocorrectionDisabled() }
+                }
+                if existing { Section { Button("この固定項目を削除", role: .destructive) { onDelete(); dismiss() } } }
+                if let message { Section { Text(message).foregroundStyle(.red) } }
+            }.writerCanvas().writerChrome().navigationTitle("固定項目").navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("キャンセル") { dismiss() } }
+                    ToolbarItem(placement: .confirmationAction) { Button("完了") { save() } }
+                }
+        }
+    }
+    private func save() {
+        do {
+            let value: BlogProfile.Value
+            switch type {
+            case .text: value = .string(text)
+            case .flag: value = .bool(flag)
+            case .number:
+                guard let number = Double(text.trimmingCharacters(in: .whitespacesAndNewlines)), number.isFinite else { throw WriterError.message("数値を入力してください。") }
+                value = .number(number)
+            case .list: value = .strings(text.components(separatedBy: .newlines).filter { !$0.isEmpty })
+            }
+            try onSave(key.trimmingCharacters(in: .whitespacesAndNewlines), value); dismiss()
+        } catch { message = error.localizedDescription }
     }
 }

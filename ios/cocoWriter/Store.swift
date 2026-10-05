@@ -6,6 +6,35 @@ import Combine
     @Published var storageError: String?
     private(set) var loaded = false
     @Published private(set) var site: SiteConfiguration
+    @Published private(set) var categories: [ArticleCategory]
+    @Published private(set) var categorySettingsError: String?
+    @Published private(set) var tagSuggestions: [String]
+    func saveTagSuggestions(_ values: [String]) throws {
+        let tags = try ArticleTags.normalized(values)
+        preferences.set(try JSONEncoder().encode(tags), forKey: ArticleTags.defaultsKey)
+        tagSuggestions = tags
+    }
+    var enabledCategories: [ArticleCategory] { categories.filter(\.isEnabled) }
+    func categoryID(for draft: Draft) -> String {
+        categories.sorted { $0.id.count > $1.id.count }.first { $0.containsDirectory(of: draft.path) }?.id ?? draft.profile.articleDirectory
+    }
+    func categoryLabel(for draft: Draft) -> String {
+        categories.first { $0.id == categoryID(for: draft) }?.name ?? draft.categoryName ?? ArticleCategory.suggestedName(for: draft.profile.articleDirectory)
+    }
+    func newDraft(kind: PostKind = .diary) -> Draft {
+        var draft = Draft(kind: kind)
+        if let category = enabledCategories.first { try? draft.selectCategory(category, configuration: site) }
+        return draft
+    }
+    func saveCategories(_ values: [ArticleCategory]) throws {
+        guard loaded, storageError == nil, remoteOperations == 0 else { throw WriterError.message("記事の保存・読み込みが終わってから設定してください。") }
+        var normalized = values
+        for index in normalized.indices { normalized[index].name = normalized[index].name.trimmingCharacters(in: .whitespacesAndNewlines) }
+        try ArticleCategory.validate(normalized)
+        // Settings affect future drafts. Existing articles keep their full profile snapshot.
+        preferences.set(try JSONEncoder().encode(normalized), forKey: ArticleCategory.defaultsKey)
+        categories = normalized; categorySettingsError = nil
+    }
     @Published private(set) var remoteOperations = 0
     func beginRemoteOperation() { remoteOperations += 1 }
     func endRemoteOperation() { remoteOperations = max(0, remoteOperations - 1) }
@@ -23,6 +52,10 @@ import Combine
         // Clear the previous destination's token before saving a different destination.
         if normalized.destinationID != site.destinationID { try TokenVault.save("") }
         preferences.set(try JSONEncoder().encode(normalized), forKey: SiteConfiguration.defaultsKey)
+        if normalized.destinationID != site.destinationID {
+            preferences.removeObject(forKey: ArticleCategory.defaultsKey)
+            categories = ArticleCategory.initial; categorySettingsError = nil
+        }
         site = normalized
     }
     private let url: URL
@@ -30,6 +63,14 @@ import Combine
     init(url: URL? = nil, preferences: UserDefaults = .standard, configuration: AppConfiguration = .current) {
         self.preferences = preferences
         self.site = SiteConfiguration.load(from: preferences, fallback: .configuredDefault(configuration))
+        self.categories = ArticleCategory.initial
+        self.tagSuggestions = (preferences.data(forKey: ArticleTags.defaultsKey).flatMap { try? JSONDecoder().decode([String].self, from: $0) }).flatMap { try? ArticleTags.normalized($0) } ?? ArticleTags.initial
+        if let bytes = preferences.data(forKey: ArticleCategory.defaultsKey) {
+            do {
+                let saved = try JSONDecoder().decode([ArticleCategory].self, from: bytes)
+                try ArticleCategory.validate(saved); self.categories = saved
+            } catch { self.categorySettingsError = "カテゴリ設定を読み込めません。設定画面で確認してください。\(error.localizedDescription)" }
+        }
         self.url = url ?? configuration.storageURL("drafts.json")
         do {
             if url == nil, let error = AppConfiguration.configurationError { throw WriterError.message(error) }
@@ -130,12 +171,14 @@ import Combine
         if remoteChanged { next[index].remoteChanged = true }
         return commitManagement(next)
     }
-    @discardableResult func mergePublishedArticles(_ remote: [Draft]) -> Bool {
+    @discardableResult func mergePublishedArticles(_ remote: [Draft], scannedProfiles: [BlogProfile] = [.current], scannedCategories: [ArticleCategory]? = nil) -> Bool {
         guard loaded, storageError == nil else { return false }
         var next = drafts
         let paths = Set(remote.map(\.path))
         for article in remote {
-            if let index = next.firstIndex(where: { $0.path == article.path && $0.profile == article.profile }) {
+            if let index = next.firstIndex(where: {
+                $0.path == article.path && ($0.profile == article.profile || ($0.supportsCurrentProfile && article.supportsCurrentProfile))
+            }) {
                 guard !next[index].hasPendingOperation else { continue }
                 if next[index].remoteSHA == nil {
                     if next[index].markdown == article.markdown {
@@ -163,11 +206,21 @@ import Combine
                 }
                 var updated = article
                 updated.id = next[index].id; updated.pinnedAt = next[index].pinnedAt
+                // Adding a more specific category must not redirect existing photo storage.
+                updated.blogProfile = next[index].blogProfile
+                updated.categoryBaseProfile = next[index].categoryBaseProfile
+                updated.categoryName = next[index].categoryName
+                updated.articleSettingsVersion = next[index].articleSettingsVersion
                 carryImages(from: next[index], to: &updated)
                 next[index] = updated
             } else { next.append(article) }
         }
-        for index in next.indices where next[index].profile == BlogProfile.current && next[index].isPublished && !next[index].hasPendingOperation && !paths.contains(next[index].path) {
+        let targets = scannedCategories?.sorted { $0.id.count > $1.id.count }
+        for index in next.indices where next[index].isPublished && !next[index].hasPendingOperation && !paths.contains(next[index].path) {
+            if let targets {
+                guard next[index].supportsCurrentProfile,
+                      targets.first(where: { $0.containsDirectory(of: next[index].path) })?.isEnabled == true else { continue }
+            } else if !scannedProfiles.contains(next[index].profile) { continue }
             next[index].remoteSHA = nil; next[index].remoteChanged = nil; next[index].deletedAt = nil
         }
         return commitManagement(next)

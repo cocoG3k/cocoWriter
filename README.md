@@ -34,12 +34,28 @@
 
 | 機能 | 内容 |
 | --- | --- |
-| **文章を書く** | 日記・記事の下書き、Markdown編集、プレビュー、書き出し。 |
+| **文章を書く** | 共通の編集画面で日記・記事の下書き、Markdown編集、プレビュー、書き出し。本文上部のボタンから曲紹介・画像を追加。 |
 | **写真を添える** | 位置情報・撮影情報を除いたJPEGに変換し、記事と写真を1コミットで投稿。 |
-| **自分のサイトに合わせる** | 保存先、画像の公開パス、Front Matter、項目名をビルド時に設定。HTML・CSSによるテーマ付きプレビューにも対応。 |
+| **自分のサイトに合わせる** | 日記・旅などのカテゴリと保存先、記事形式・項目名、タグ候補を設定画面で登録。記事ごとにカテゴリと複数のタグを選択。HTML・CSSによるテーマ付きプレビューにも対応。 |
 | **公開済みの記事を扱う** | GitHubから記事を読み込み、編集・公開解除。競合時は端末の編集中の内容を保護。 |
-| **好きな音楽を残す** | Spotifyの曲・アルバム紹介、曲のストック、YouTube Music共有拡張。 |
+| **好きな音楽を残す** | Spotifyの曲・アルバム紹介、曲のストック、YouTube Music・Apple Music・Amazon Music共有拡張。 |
 | **自分だけのメモを書く** | 公開せず、端末内に保存するメモ・日記。 |
+
+音楽サービスからの変換は曲単位です。本体と共有拡張で次の形式を受け付けます。
+
+- YouTube Music: `music.youtube.com/watch?v=曲ID`（YouTubeの`watch`・`youtu.be`形式も正規化）。
+- Apple Music: `music.apple.com/{国}/song/{曲ID}`、`/{国}/song/{曲名}/{曲ID}`、`/{国}/album/{アルバム名}/{アルバムID}?i={曲ID}`。
+- Amazon Music: `music.amazon.{地域}/tracks/{ASIN}`、`/albums/{アルバムASIN}?trackAsin={曲ASIN}`。対応ホストは com / co.jp / co.uk / de / fr / it / es / ca / com.au / com.br / com.mx / in。
+- 短縮共有URL: `apple.co`、`amzn.to`、`a.co`（`/d/…`を含む）。HTTPSの転送先を各段階で検証し、同じサービスの曲が特定できた場合に取得します。商品・アーティスト・アルバムのみのリンクは曲へ変換しません。
+
+[Songlinkの公開曲ページ](https://song.link/a/B084KPC3Q7)で曲ID・サービス・曲種別を確認してSpotify対応リンクを利用します。不足する場合、Appleは[公開iTunes Lookup API](https://developer.apple.com/library/archive/documentation/AudioVideo/Conceptual/iTuneSearchAPI/LookupExamples.html)（共有URLの国を指定）、Apple/Amazonは公開ページのSchema.org曲メタデータを使います。YouTubeは従来のoEmbedを維持しています。取得した情報から従来のMusicBrainz・Appleカタログの照合を行い、Spotify候補を提示します。選択と曲・バージョンの確認は利用者が行います。
+
+2026-10-05の公開ページ確認では、Appleの曲URL・アルバムURLの`i`形式と米国/日本のLookup結果、Amazonの`tracks`形式と公式資料にある`trackAsin`形式、SonglinkのYouTube/Apple/Amazonの曲情報を確認しました。AmazonのHTMLがプレイヤー起動用だけで曲情報を含まない例と、Songlinkがアルバムを返す例も確認しています。その場合は誤った曲を選ばず、理由を表示します。曲名・アーティストの手入力、Spotify検索・共有URL貼り付けで続けられます。
+
+[Apple Music API](https://developer.apple.com/documentation/applemusicapi/generating-developer-tokens)には開発者トークンが必要です。[Amazon Music Web API](https://developer.amazon.com/docs/music/API_web_LWA.html)には認証とサービス側の利用承認が必要で、[閉鎖ベータ](https://www.developer.amazon.com/docs/music/API_web_search_v2.html)です。今回これらの認証APIは追加していません。公開情報の変更、非公開・地域制限、通信障害で候補を取得できない場合があります。アルバム全曲・プレイリストの一括変換には対応しません。
+
+保存項目`youtubeURL`は旧データとの互換性のため維持し、対応する全サービスの共有元URLを格納します。下書き・ストック・共有受信データの形式と、アプリ識別子・App Group・保存先・Keychain設定は変更しません。
+
 
 ### 自分のGitHub Pagesに合わせて
 
@@ -52,7 +68,7 @@
 | Hugo | `content/posts/` | [YAML](config/hugo-yaml.json) · [TOML](config/hugo-toml.json) · [JSON](config/hugo-json.json) |
 | 既存サイトのテーマ付きプレビュー | サイトに合わせて指定 | [sfuji.orgでの検証](docs/SFUJI_VALIDATION.md) |
 
-アプリはiOSネイティブで、GitHub Pagesに公開するのはブログです。既存サイトには、[対応する記事形式](docs/content-format.md)に合わせたビルド設定が必要です。
+アプリはiOSネイティブで、GitHub Pagesに公開するのはブログです。既存サイトには、設定画面で[対応する記事形式](docs/content-format.md)と保存先を合わせます。
 
 **必要なもの：Mac、Swift 6.2以降を含むXcode、iOS 17以降。** ソースからビルドして使います。App Storeでの配信はありません。同梱のブログテンプレートにはNode.js 22以降を使います。
 
@@ -78,7 +94,7 @@ cd ../my-journal
 
 GitHubの Settings → Pages → Build and deployment → Source を **GitHub Actions** にし、Actionsの「Publish blog to GitHub Pages」を実行します。ワークフローが公開URLを取得し、リポジトリ名を含むパスを自動で反映します。[GitHub公式手順](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages)
 
-既存ブログを使う場合は、[ビルド設定](docs/content-format.md)で、そのサイトに合わせた保存先とFront Matterを指定します。
+既存ブログを使う場合は、[記事設定](docs/content-format.md)で、そのサイトに合わせた保存先とFront Matterを指定します。ビルド時のJSONで初期値を用意することもできます。
 
 ### 2. iPhoneアプリをビルドする
 

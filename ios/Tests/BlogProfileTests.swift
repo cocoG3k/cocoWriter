@@ -183,6 +183,290 @@ final class BlogProfileTests: XCTestCase {
     }
 }
 
+final class ArticleCategoryTests: XCTestCase {
+    private var journey: ArticleCategory {
+        var profile = BlogProfile.current
+        profile.articleDirectory = "src/content/journey"
+        profile.imageDirectory = "public/images/journey"; profile.imagePublicPath = "/images/journey"
+        return ArticleCategory(name: "旅", profile: profile)
+    }
+    private var site: SiteConfiguration { SiteConfiguration(owner: "example", repository: "journal", website: "https://example.org/") }
+    private func song() -> MusicItem {
+        var item = MusicItem(); item.title = "旅で聴いた曲"; item.comment = "紹介文"
+        item.spotifyURL = "https://open.spotify.com/track/0123456789ABCDEFGHIJKL"; item.confirmed = true
+        return item
+    }
+    func testTagSelectionPreservesCustomTagsAndCategory() throws {
+        var article = Draft(kind: .diary); article.tags = "思い出, 音楽"
+        try article.selectCategory(journey, configuration: site)
+        let profile = article.profile, path = article.path
+        article.tags = ArticleTags.toggling("散歩", in: article.tags)
+        XCTAssertEqual(article.tags, "思い出, 音楽, 散歩")
+        article.tags = ArticleTags.toggling("音楽", in: article.tags)
+        XCTAssertEqual(article.tags, "思い出, 散歩")
+        XCTAssertEqual(article.profile, profile); XCTAssertEqual(article.path, path)
+        try article.selectCategory(ArticleCategory.initial[0], configuration: site)
+        XCTAssertEqual(article.tags, "思い出, 散歩")
+        XCTAssertEqual(try ArticleTags.normalized([" 散歩 ", "音楽", "散歩"]), ["散歩", "音楽"])
+        for invalid in ["", "散歩,音楽", "散歩、音楽", "散歩\n音楽"] {
+            XCTAssertThrowsError(try ArticleTags.normalized([invalid]))
+        }
+    }
+    @MainActor func testTagSuggestionsPersistIndependentlyOfArticleTags() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let suite = "tag-test-" + UUID().uuidString
+        let isolated = UserDefaults(suiteName: suite)!
+        defer { try? FileManager.default.removeItem(at: folder); isolated.removePersistentDomain(forName: suite) }
+        let store = DraftStore(url: folder.appendingPathComponent("drafts.json"), preferences: isolated)
+        XCTAssertEqual(store.tagSuggestions, ArticleTags.initial)
+        try store.saveTagSuggestions([" 散歩 ", "音楽", "散歩"])
+        var article = store.newDraft(); article.tags = "音楽, 個人メモ"
+        XCTAssertTrue(store.update(article))
+        let reopened = DraftStore(url: folder.appendingPathComponent("drafts.json"), preferences: isolated)
+        XCTAssertEqual(reopened.tagSuggestions, ["散歩", "音楽"])
+        XCTAssertThrowsError(try reopened.saveTagSuggestions(["不正,タグ"]))
+        XCTAssertEqual(reopened.tagSuggestions, ["散歩", "音楽"])
+        try reopened.saveTagSuggestions([])
+        XCTAssertEqual(reopened.drafts.first?.tags, "音楽, 個人メモ")
+        XCTAssertEqual(reopened.categories, ArticleCategory.initial)
+        XCTAssertTrue(DraftStore(url: folder.appendingPathComponent("drafts.json"), preferences: isolated).tagSuggestions.isEmpty)
+    }
+    func testMusicCanBeAddedToAnyArticleAndImportedMarkdown() throws {
+        var article = Draft(kind: .diary); article.title = "旅の記録"; article.description = "説明"; article.body = "本文"
+        XCTAssertNil(article.validation)
+        article.music = [song()]
+        XCTAssertTrue(article.containsMusic); XCTAssertTrue(ArticleFilter.music.includes(article))
+        XCTAssertNil(article.validation)
+        XCTAssertTrue(article.markdown.contains("紹介文")); XCTAssertTrue(article.markdown.contains("<iframe"))
+        XCTAssertTrue(BlogPreviewHTML.document(article).contains("旅で聴いた曲"))
+        article.music[0].confirmed = false; XCTAssertNotNil(article.validation)
+        article.music = []; XCTAssertNil(article.validation); XCTAssertFalse(article.markdown.contains("<iframe"))
+        let original = article.markdown.replacingOccurrences(of: "---\n\n本文", with: "custom: keep\n---\n\n本文")
+        var imported = try RepositoryArticleMarkdown.decode(path: article.path, sha: "v1", markdown: original)
+        imported.music = [song()]
+        let sent = imported.markdown
+        XCTAssertTrue(sent.contains("custom: keep")); XCTAssertTrue(sent.contains("紹介文"))
+        imported.repositorySource = RepositorySource(markdown: sent, title: imported.title, description: imported.description, date: imported.date, tags: imported.tags)
+        XCTAssertEqual(imported.markdown, sent)
+        XCTAssertEqual(imported.markdown.components(separatedBy: "<iframe").count - 1, 1)
+    }
+    func testCategorySwitchKeepsContentAndRemapsPhotoReferences() throws {
+        var article = Draft(kind: .diary); article.title = "旅の記録"; article.description = "説明"; article.tags = "思い出"
+        let hash = String(repeating: "a", count: 64), oldPath = article.profile.imagePath(id: article.id, hash: String(repeating: "a", count: 64))
+        let oldReference = try XCTUnwrap(article.profile.imageReference(for: oldPath, configuration: site))
+        let image = ArticleImage(hash: hash, repositoryPath: oldPath, width: 10, height: 20, byteCount: 100, publishedPath: oldReference)
+        article.images = [image]; article.body = "本文\n" + image.markdown
+        article.music = [song()]; article.music[0].comment += "\n" + image.markdown
+        let id = article.id
+        try article.selectCategory(journey, configuration: site)
+        XCTAssertEqual(article.id, id); XCTAssertEqual(article.tags, "思い出"); XCTAssertEqual(article.title, "旅の記録")
+        XCTAssertTrue(article.path.hasPrefix("src/content/journey/")); XCTAssertTrue(article.supportsCurrentProfile); XCTAssertNil(article.validation)
+        XCTAssertEqual(article.attachedImages.first?.hash, hash)
+        XCTAssertTrue(article.attachedImages[0].repositoryPath.hasPrefix("public/images/journey/"))
+        XCTAssertTrue(article.body.contains("/images/journey/")); XCTAssertTrue(article.music[0].comment.contains("/images/journey/"))
+        XCTAssertEqual(article.referencedImages.count, 1)
+        let restored = try JSONDecoder().decode(Draft.self, from: JSONEncoder().encode(article))
+        XCTAssertEqual(restored.profile, journey.profile); XCTAssertEqual(restored.categoryBaseProfile, .current)
+        let projectSite = SiteConfiguration(owner: "example", repository: "journal", website: "https://example.github.io/journal/")
+        let html = BlogPreviewHTML.document(restored, configuration: projectSite)
+        XCTAssertTrue(html.contains("https://example.github.io/journal/images/journey/"))
+        article.repositoryPath = article.path
+        let frozen = article
+        XCTAssertThrowsError(try article.selectCategory(ArticleCategory.initial[0], configuration: site)); XCTAssertEqual(article, frozen)
+        var unsupported = restored; unsupported.categoryBaseProfile = nil; unsupported.articleSettingsVersion = nil
+        XCTAssertFalse(unsupported.supportsCurrentProfile)
+    }
+    @MainActor func testSelectedCategoriesPersistAndRefreshOnlyScannedProfiles() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let suite = "category-test-" + UUID().uuidString
+        // Keep this test's preferences isolated from the user's app settings.
+        let isolated = UserDefaults(suiteName: suite)!
+        defer { try? FileManager.default.removeItem(at: folder); isolated.removePersistentDomain(forName: suite) }
+        let store = DraftStore(url: folder.appendingPathComponent("drafts.json"), preferences: isolated)
+        try store.saveCategories(ArticleCategory.initial + [journey])
+        var article = store.newDraft(); article.title = "旅"; article.description = "説明"
+        try article.selectCategory(journey, configuration: site); article.repositoryPath = article.path; article.remoteSHA = "published"
+        XCTAssertTrue(store.update(article))
+        var changed = store.categories; changed[1].profile.imagePublicPath = "/other"
+        try store.saveCategories(changed)
+        XCTAssertEqual(store.drafts.first?.profile, journey.profile)
+        changed = store.categories; changed[1].isEnabled = false; try store.saveCategories(changed)
+        XCTAssertTrue(store.mergePublishedArticles([], scannedProfiles: store.enabledCategories.map(\.profile)))
+        XCTAssertEqual(store.drafts.first?.remoteSHA, "published")
+        let reopened = DraftStore(url: folder.appendingPathComponent("drafts.json"), preferences: isolated)
+        XCTAssertEqual(reopened.categories, changed); XCTAssertEqual(reopened.drafts.first?.profile, journey.profile)
+        XCTAssertTrue(reopened.mergePublishedArticles([], scannedProfiles: [journey.profile]))
+        XCTAssertNil(reopened.drafts.first?.remoteSHA)
+        XCTAssertThrowsError(try reopened.saveCategories(changed.map { var value = $0; value.isEnabled = false; return value }))
+        XCTAssertThrowsError(try reopened.saveCategories(ArticleCategory.initial + ArticleCategory.initial))
+    }
+    func testRuntimeArticleFormatsAndFieldsRoundTripWithoutRebuilding() throws {
+        for format in [BlogProfile.Format.yaml, .toml, .json] {
+            var category = journey
+            category.profile.frontMatter.format = format
+            category.profile.frontMatter.fields = BlogProfile.Fields(title: "headline", description: "summary", date: "publishedAt", tags: "labels")
+            category.profile.frontMatter.dateStyle = .iso8601
+            category.profile.frontMatter.extra = ["draft": .bool(false), "weight": .number(3), "section": .string("旅"), "aliases": .strings(["one", "two"])]
+            category.profile.filenameTemplate = "{date}-{id}.markdown"
+            try ArticleCategory.validate([category])
+            var draft = Draft(kind: .diary); draft.title = "新形式の記事"; draft.description = "説明"; draft.tags = "散歩, 音楽"; draft.body = "本文"
+            try draft.selectCategory(category, configuration: site)
+            XCTAssertNil(draft.validation); XCTAssertTrue(draft.supportsCurrentProfile)
+            XCTAssertEqual(draft.publicationProfile, category.profile)
+            XCTAssertTrue(draft.path.hasSuffix(".markdown")); XCTAssertTrue(draft.markdown.contains("headline"))
+            let decoded = try RepositoryArticleMarkdown.decode(path: draft.path, sha: "v1", markdown: draft.markdown, profile: category.profile)
+            XCTAssertEqual(decoded.title, draft.title); XCTAssertEqual(decoded.tags, draft.tags); XCTAssertEqual(decoded.body.trimmingCharacters(in: .whitespacesAndNewlines), "本文")
+            let saved = try JSONDecoder().decode(Draft.self, from: JSONEncoder().encode(draft))
+            XCTAssertEqual(saved.profile, category.profile); XCTAssertEqual(saved.articleSettingsVersion, 1); XCTAssertNil(saved.validation)
+            var future = saved; future.articleSettingsVersion = 2
+            XCTAssertFalse(future.supportsCurrentProfile)
+            var invalid = saved; invalid.blogProfile?.frontMatter.fields.date = "headline"
+            XCTAssertFalse(invalid.supportsCurrentProfile)
+        }
+    }
+    @MainActor func testEditingSettingsKeepsExistingArticlesAndPhotosAtOriginalPaths() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let suite = "article-settings-" + UUID().uuidString
+        let isolated = UserDefaults(suiteName: suite)!
+        defer { try? FileManager.default.removeItem(at: folder); isolated.removePersistentDomain(forName: suite) }
+        let store = DraftStore(url: folder.appendingPathComponent("drafts.json"), preferences: isolated)
+        try store.saveCategories([journey])
+        var old = store.newDraft(); old.title = "既存記事"; old.description = "説明"
+        let path = old.profile.imagePath(id: old.id, hash: String(repeating: "a", count: 64))
+        let reference = try XCTUnwrap(old.profile.imageReference(for: path, configuration: site))
+        old.images = [ArticleImage(hash: String(repeating: "a", count: 64), repositoryPath: path, width: 10, height: 10, byteCount: 100, publishedPath: reference)]
+        old.body = old.attachedImages[0].markdown; old.repositoryPath = old.path; old.remoteSHA = "v1"
+        XCTAssertTrue(store.update(old))
+        var changed = journey
+        changed.profile.articleDirectory = "content/travel"; changed.profile.imageDirectory = "static/travel"; changed.profile.imagePublicPath = "/travel"
+        changed.profile.frontMatter.format = .json; changed.profile.frontMatter.fields.title = "headline"
+        try store.saveCategories([changed])
+        let reopened = DraftStore(url: folder.appendingPathComponent("drafts.json"), preferences: isolated)
+        let saved = try XCTUnwrap(reopened.drafts.first)
+        XCTAssertEqual(saved.profile, old.profile); XCTAssertEqual(saved.path, old.path); XCTAssertEqual(saved.markdown, old.markdown)
+        XCTAssertEqual(saved.attachedImages, old.attachedImages); XCTAssertNil(saved.validation)
+        let new = reopened.newDraft()
+        XCTAssertEqual(new.profile, changed.profile); XCTAssertTrue(new.supportsCurrentProfile)
+        XCTAssertTrue(reopened.mergePublishedArticles([], scannedProfiles: [changed.profile], scannedCategories: reopened.categories))
+        XCTAssertEqual(reopened.drafts.first?.remoteSHA, "v1")
+        changed = journey; changed.profile.frontMatter.fields.title = "headline"
+        try reopened.saveCategories([changed])
+        XCTAssertTrue(reopened.mergePublishedArticles([], scannedProfiles: [changed.profile], scannedCategories: reopened.categories))
+        XCTAssertNil(reopened.drafts.first?.remoteSHA)
+    }
+    func testRemoteRefreshUsesSavedFieldsAfterCategorySettingsChange() async throws {
+        let config = URLSessionConfiguration.ephemeral; config.protocolClasses = [CategoryFixtureProtocol.self]
+        let publisher = GitHubPublisher(configuration: site, session: URLSession(configuration: config))
+        let initial = ArticleCategory.initial + [journey]
+        let old = try await publisher.publishedArticles(token: "fixture", categories: initial)
+        var changed = initial
+        changed[0].profile.frontMatter.format = .toml
+        changed[0].profile.frontMatter.fields = BlogProfile.Fields(title: "headline", description: "summary", date: "publishedAt", tags: "labels")
+        changed[0].profile.articleExtensions = ["markdown"]
+        changed[0].profile.filenameTemplate = "{id}.markdown"
+        let refreshed = try await publisher.publishedArticles(token: "fixture", categories: changed, knownArticles: old)
+        XCTAssertEqual(refreshed.count, old.count)
+        for article in refreshed {
+            let original = try XCTUnwrap(old.first { $0.path == article.path })
+            XCTAssertEqual(article.profile, original.profile); XCTAssertEqual(article.markdown, original.markdown)
+            XCTAssertTrue(article.supportsCurrentProfile)
+        }
+    }
+    func testImportedArticleKeepsUnknownMetadataWhenSelectingDifferentFormat() throws {
+        var source = Draft(kind: .diary); source.title = "既存"; source.description = "説明"; source.body = "本文"
+        let markdown = source.markdown.replacingOccurrences(of: "---\n\n本文", with: "custom: keep\n---\n\n本文")
+        var imported = try RepositoryArticleMarkdown.decode(path: source.path, sha: "v1", markdown: markdown)
+        imported.repositoryPath = nil; imported.remoteSHA = nil
+        var changed = journey; changed.profile.frontMatter.format = .toml
+        XCTAssertThrowsError(try imported.selectCategory(changed, configuration: site))
+        XCTAssertEqual(imported.markdown, markdown)
+        changed.profile.frontMatter = imported.profile.frontMatter
+        try imported.selectCategory(changed, configuration: site)
+        XCTAssertEqual(imported.markdown, markdown)
+        var duplicateKeys = journey; duplicateKeys.profile.frontMatter.fields.date = duplicateKeys.profile.frontMatter.fields.title
+        XCTAssertThrowsError(try ArticleCategory.validate([duplicateKeys]))
+    }
+    @MainActor func testNestedCategoryRefreshKeepsUnscannedArticlesAndAvoidsDuplicates() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let suite = "nested-category-" + UUID().uuidString
+        let isolated = UserDefaults(suiteName: suite)!
+        defer { try? FileManager.default.removeItem(at: folder); isolated.removePersistentDomain(forName: suite) }
+        let store = DraftStore(url: folder.appendingPathComponent("drafts.json"), preferences: isolated)
+        var parentProfile = BlogProfile.current; parentProfile.articleDirectory = "src/content"
+        let parent = ArticleCategory(name: "記事", profile: parentProfile)
+        var disabled = journey; disabled.isEnabled = false
+        try store.saveCategories([parent, disabled])
+        var original = Draft(kind: .diary); original.title = "旅"; original.description = "説明"
+        try original.selectCategory(parent, configuration: site)
+        original.repositoryPath = journey.id + "/existing.md"; original.remoteSHA = "v1"
+        XCTAssertTrue(store.update(original))
+        XCTAssertTrue(store.mergePublishedArticles([], scannedProfiles: [parentProfile], scannedCategories: store.categories))
+        XCTAssertEqual(store.drafts.first?.remoteSHA, "v1")
+        XCTAssertEqual(store.categoryID(for: original), journey.id)
+        try store.saveCategories([parent, journey])
+        var imported = try RepositoryArticleMarkdown.decode(path: original.path, sha: "v1", markdown: original.markdown, profile: journey.profile)
+        imported.categoryBaseProfile = .current; imported.categoryName = journey.name
+        XCTAssertTrue(store.mergePublishedArticles([imported], scannedProfiles: [parentProfile, journey.profile], scannedCategories: store.categories))
+        XCTAssertEqual(store.drafts.count, 1); XCTAssertEqual(store.drafts.first?.id, original.id)
+        XCTAssertEqual(store.drafts.first?.profile, original.profile)
+        XCTAssertEqual(store.categoryLabel(for: original), "旅")
+    }
+    func testMultipleDirectoriesReadAndPublishWithTheirOwnPaths() async throws {
+        let config = URLSessionConfiguration.ephemeral; config.protocolClasses = [CategoryFixtureProtocol.self]
+        let session = URLSession(configuration: config)
+        let publisher = GitHubPublisher(configuration: site, session: session)
+        let directories = try await publisher.articleDirectories(token: "fixture")
+        XCTAssertEqual(directories, ["docs", "src/content/diary", "src/content/journey"])
+        let categories = ArticleCategory.initial + [journey]
+        let articles = try await publisher.publishedArticles(token: "fixture", categories: categories)
+        XCTAssertEqual(articles.count, 2)
+        let trip = try XCTUnwrap(articles.first { $0.profile.articleDirectory == journey.id })
+        XCTAssertEqual(trip.categoryName, "旅"); XCTAssertTrue(trip.supportsCurrentProfile)
+        XCTAssertTrue(trip.markdown.contains("旅の本文"))
+        var disabled = journey; disabled.isEnabled = false
+        let diaryOnly = try await publisher.publishedArticles(token: "fixture", categories: ArticleCategory.initial + [disabled])
+        XCTAssertEqual(diaryOnly.count, 1)
+        var parent = BlogProfile.current; parent.articleDirectory = "src/content"
+        let nested = try await publisher.publishedArticles(token: "fixture", categories: [ArticleCategory(name: "記事", profile: parent), disabled])
+        XCTAssertEqual(nested.count, 1)
+        XCTAssertTrue(nested.allSatisfy { !$0.path.contains("/journey/") })
+        var new = Draft(kind: .diary); new.title = "新しい旅"; new.description = "説明"
+        try new.selectCategory(journey, configuration: site); new.pendingMarkdown = new.markdown
+        let target = GitHubPublisher(configuration: site, session: session, profile: new.publicationProfile)
+        let result = try await target.publish(new, token: "fixture")
+        XCTAssertEqual(result.sha, "new")
+    }
+}
+
+private final class CategoryFixtureProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let url = request.url!, path = request.url!.path
+        var status = 200, payload: [String: Any] = [:]
+        let diarySHA = String(repeating: "a", count: 40), journeySHA = String(repeating: "b", count: 40)
+        if path.contains("/git/trees/") {
+            payload = ["truncated": false, "tree": [
+                ["path": "src/content/diary/old.md", "type": "blob", "sha": diarySHA],
+                ["path": "src/content/journey/trip.md", "type": "blob", "sha": journeySHA],
+                ["path": "docs/readme.md", "type": "blob", "sha": String(repeating: "c", count: 40)],
+                ["path": "src/content/template/_index.md", "type": "blob", "sha": String(repeating: "d", count: 40)]]]
+        } else if path.contains("/git/blobs/") {
+            let isTrip = path.hasSuffix(journeySHA)
+            let markdown = "---\ntitle: \"記事\"\ndescription: \"説明\"\ndate: 2026-10-05\ntags: []\n---\n\n" + (isTrip ? "旅の本文" : "日記の本文")
+            payload = ["sha": isTrip ? journeySHA : diarySHA, "encoding": "base64", "content": Data(markdown.utf8).base64EncodedString()]
+        } else if path.contains("/contents/") {
+            XCTAssertTrue(path.contains("/contents/src/content/journey/ios-"))
+            if request.httpMethod == "PUT" {
+                status = 201; payload = ["content": ["sha": "new"], "commit": ["html_url": "https://github.com/example/journal/commit/test"]]
+            } else { status = 404 }
+        } else { XCTFail("Unexpected request: \(path)"); status = 404 }
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: try! JSONSerialization.data(withJSONObject: payload)); client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() { }
+}
+
 final class PreviewTemplateTests: XCTestCase {
     func testSiteArticleHTMLBreaksRenderWithoutAllowingAttributesOrScripts() {
         let html = BlogPreviewHTML.renderMarkdown("前<br>後\n\n<br><br />\n\n<HR>\n\n<br onmouseover=\"alert(1)\">\n\n<script>alert(1)</script>")
