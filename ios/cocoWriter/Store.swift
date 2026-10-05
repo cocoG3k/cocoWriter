@@ -27,13 +27,22 @@ import Combine
     }
     private let url: URL
     var imageFiles: ArticleImageFiles { ArticleImageFiles(root: url.deletingLastPathComponent().appendingPathComponent("images", isDirectory: true)) }
-    init(url: URL? = nil, preferences: UserDefaults = .standard) {
+    init(url: URL? = nil, preferences: UserDefaults = .standard, configuration: AppConfiguration = .current) {
         self.preferences = preferences
-        self.site = SiteConfiguration.load(from: preferences)
-        self.url = url ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("cocoWriter/drafts.json")
+        self.site = SiteConfiguration.load(from: preferences, fallback: .configuredDefault(configuration))
+        self.url = url ?? configuration.storageURL("drafts.json")
         do {
+            if url == nil, let error = AppConfiguration.configurationError { throw WriterError.message(error) }
             if FileManager.default.fileExists(atPath: self.url.path) {
                 drafts = try JSONDecoder().decode([Draft].self, from: Data(contentsOf: self.url))
+            }
+            if let destination = configuration.legacyDestinationID {
+                for index in drafts.indices where drafts[index].blogProfile == nil && drafts[index].remoteDestination == nil {
+                    let draft = drafts[index]
+                    if draft.remoteSHA != nil || draft.hasPendingOperation || draft.repositoryPath != nil || draft.imageCommitSHA != nil || draft.commitURL != nil {
+                        drafts[index].remoteDestination = destination
+                    }
+                }
             }
             loaded = true
         } catch { storageError = "下書きを読み込めません。元ファイルを保護するため保存を停止しました。\(error.localizedDescription)" }

@@ -3,12 +3,19 @@
 from pathlib import Path
 import hashlib
 import json
+import plistlib
 import re
 import xml.etree.ElementTree as ET
 
 root = Path(__file__).resolve().parent.parent
 import runpy
 validate_profile = runpy.run_path(str(root / "tools/configure-blog.py"))["validate"]
+validate_app = runpy.run_path(str(root / "tools/configure-variant.py"))["validate"]
+for profile in (root / "config/app").glob("*.json"):
+    validate_app(json.loads(profile.read_text()))
+runtime = json.loads((root / "ios/cocoWriter/WriterConfiguration.json").read_text())
+for entitlement in [root / "ios/cocoWriter/cocoWriter.entitlements", root / "ios/ShareExtension/ShareExtension.entitlements"]:
+    assert plistlib.loads(entitlement.read_bytes())["com.apple.security.application-groups"] == [runtime["appGroupIdentifier"]], "App Group differs from runtime configuration"
 for profile in list((root / "config").glob("*.json")) + [root / "ios/cocoWriter/BlogProfile.json", root / "site-template/blog-profile.json"]:
     validate_profile(json.loads(profile.read_text()))
 project = (root / "ios/cocoWriter.xcodeproj/project.pbxproj").read_text()
@@ -29,7 +36,7 @@ for component in inventory["components"]:
     properties = {p["name"]: p["value"] for p in component["properties"]}
     assert revisions[component["name"]] == properties["cocowriter:git-revision"]
     assert (root / "ios/cocoWriter" / properties["cocowriter:license-resource"]).is_file()
-excluded = {".git", ".build-cache", ".validation-cache", "node_modules", "dist", "altstore", "releases", "__pycache__"}
+excluded = {".git", ".build-cache", ".validation-cache", ".local", "node_modules", "dist", "altstore", "releases", "__pycache__"}
 for p in root.rglob("*"):
     if not p.is_file() or excluded.intersection(p.relative_to(root).parts) or p.name == ".source-integrity.json":
         continue

@@ -56,6 +56,8 @@
 
 **必要なもの：Mac、Swift 6.2以降を含むXcode、iOS 17以降。** ソースからビルドして使います。App Storeでの配信はありません。同梱のブログテンプレートにはNode.js 22以降を使います。
 
+アプリ名・識別子・保存先・公開先の初期値も、[自分用の設定](docs/app-variants.md)としてまとめられます。生成したXcodeプロジェクトは共通ソースを直接参照するため、既存アプリの識別子とデータを引き継ぎながらcocoWriterで開発を続けられます。
+
 ## 最短の導入手順
 
 まずソースを取得します。
@@ -138,6 +140,7 @@ GitHubで対象リポジトリだけを選んだFine-grained personal access tok
 ```sh
 python3 tools/check-project.py
 python3 tools/test_build_profiles.py
+python3 tools/test_app_variants.py
 python3 tools/test-ios.py
 cd site-template
 npm ci

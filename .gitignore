@@ -1,6 +1,8 @@
 .DS_Store
 .build-cache/
 .validation-cache/
+.local/
+AGENTS.local.md
 .source-integrity.json
 altstore/
 *.ipa

@@ -22,6 +22,8 @@ cocoWriter is a native iPhone app for writing Markdown articles, adding photos, 
 
 ## Get started
 
+You can also [generate a configured Xcode project](app-variants.md) with your own display name, app and extension identifiers, App Group, storage directory, Keychain service, and initial publishing destination. Generated projects reference the shared source files. To upgrade an existing installation, preserve its identity and storage configuration.
+
 Clone `https://github.com/cocoG3k/cocoWriter.git` and open a terminal in the `cocoWriter` directory. The app is distributed as source and requires a Mac to build; it is not available on the App Store.
 
 1. Run `python3 tools/create-blog.py ../my-journal`. Put the generated folder's contents at the root of a new GitHub repository, including `.github/`.

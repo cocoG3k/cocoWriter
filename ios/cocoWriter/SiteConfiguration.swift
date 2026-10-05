@@ -11,9 +11,13 @@ struct SiteConfiguration: Codable, Equatable {
 
     static let defaultsKey = "cocoWriter.site.v1"
     static var current: SiteConfiguration { load(from: .standard) }
-    static func load(from defaults: UserDefaults) -> SiteConfiguration {
+    static func configuredDefault(_ app: AppConfiguration = .current) -> SiteConfiguration {
+        let site = app.defaultSite
+        return Self(owner: site.owner, repository: site.repository, branch: site.branch, website: site.website, title: site.title, tagline: site.tagline)
+    }
+    static func load(from defaults: UserDefaults, fallback: SiteConfiguration? = nil) -> SiteConfiguration {
         guard let bytes = defaults.data(forKey: defaultsKey),
-              let value = try? JSONDecoder().decode(Self.self, from: bytes) else { return Self() }
+              let value = try? JSONDecoder().decode(Self.self, from: bytes) else { return fallback ?? configuredDefault() }
         return value
     }
     var repositorySlug: String { owner + "/" + repository }

@@ -178,8 +178,7 @@ enum PublicJPEG {
 struct ArticleImageFiles {
     let root: URL
     init(root: URL? = nil) {
-        self.root = root ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("cocoWriter/images", isDirectory: true)
+        self.root = root ?? AppConfiguration.current.storageURL("images")
     }
     func url(for image: ArticleImage) throws -> URL {
         guard BlogProfile.safePath(image.repositoryPath), image.hash.count == 64, image.hash.allSatisfy({ "0123456789abcdef".contains($0) }), image.repositoryPath.hasSuffix("/\(image.hash).jpg") else {

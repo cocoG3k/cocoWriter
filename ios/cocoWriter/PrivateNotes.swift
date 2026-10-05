@@ -170,13 +170,15 @@ enum PrivateNoteTimeline {
     private let url: URL
     private let tagURL: URL
     init(url: URL? = nil, tagURL: URL? = nil) {
-        self.url = url ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("cocoWriter/private-notes.json")
+        self.url = url ?? AppConfiguration.current.storageURL("private-notes.json")
         self.tagURL = tagURL ?? self.url.deletingLastPathComponent().appendingPathComponent("private-note-tags.json")
         do {
+            if url == nil, let error = AppConfiguration.configurationError { throw WriterError.message(error) }
             if FileManager.default.fileExists(atPath: self.url.path) { notes = try JSONDecoder().decode([PrivateNote].self, from: Data(contentsOf: self.url)) }
             loaded = true
         } catch { storageError = "メモを読み込めません。元ファイルを保護するため保存を停止しました。\(error.localizedDescription)" }
         do {
+            if url == nil, let error = AppConfiguration.configurationError { throw WriterError.message(error) }
             if FileManager.default.fileExists(atPath: self.tagURL.path) { tagCatalog = try JSONDecoder().decode(NoteTagCatalog.self, from: Data(contentsOf: self.tagURL)) }
             tagsLoaded = true
         } catch { tagStorageError = "タグの設定を読み込めません。元ファイルを保護するため変更を停止しました。\(error.localizedDescription)" }

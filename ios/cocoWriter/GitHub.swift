@@ -6,7 +6,7 @@ enum WriterError: LocalizedError {
     var errorDescription: String? { if case .message(let text) = self { return text }; return nil }
 }
 enum TokenVault {
-    private static let service = "cocoWriter.GitHub"
+    private static var service: String { AppConfiguration.current.keychainService }
     static func read() throws -> String {
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: "personal", kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne]
         var result: CFTypeRef?
@@ -100,6 +100,7 @@ actor GitHubPublisher {
         }
     }
     private func validateDestination(_ draft: Draft) throws {
+        if let error = AppConfiguration.configurationError { throw WriterError.message(error) }
         if let error = BlogProfile.configurationError { throw WriterError.message(error) }
         guard draft.profile == profile else { throw WriterError.message("この記事のビルド設定が現在のアプリと異なります。元の設定でビルドしてください。") }
         try profile.validate()

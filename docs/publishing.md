@@ -20,7 +20,7 @@ cocoWriterの公開リポジトリは [cocoG3k/cocoWriter](https://github.com/co
 python3 tools/package-source.py
 ```
 
-`releases/cocoWriter-0.2.1-source.zip` と `releases/cocoWriter-0.2.1-blog-template.zip` を生成します。ファイル名のバージョンはXcodeプロジェクトの設定から取得します。ソースZIPにはアプリ・テンプレート・ドキュメントが入り、ブログZIPは利用者のブログリポジトリへ配置する雛形です。ビルド生成物、個人の検証ログ、Gitの管理情報は入りません。
+`releases/cocoWriter-0.3.0-source.zip` と `releases/cocoWriter-0.3.0-blog-template.zip` を生成します。ファイル名のバージョンはXcodeプロジェクトの設定から取得します。ソースZIPにはアプリ・テンプレート・ドキュメントが入り、ブログZIPは利用者のブログリポジトリへ配置する雛形です。ビルド生成物、個人の検証ログ、Gitの管理情報は入りません。
 
 実行にはGitリポジトリが必要です。ソースZIPを展開して利用する場合は、プロジェクトのルートで `git init -b main` を実行してから使えます。ローカルで作成したファイルもGitの除外ルールに従ってパッケージへ入るため、配布前に変更内容を確認してください。
 

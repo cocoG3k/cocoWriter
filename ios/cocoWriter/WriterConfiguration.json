@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "storageDirectory": "cocoWriter",
+  "keychainService": "cocoWriter.GitHub",
+  "appGroupIdentifier": "group.org.example.cocoWriter",
+  "defaultSite": {
+    "owner": "",
+    "repository": "",
+    "branch": "main",
+    "website": "",
+    "title": "My Journal",
+    "tagline": "日々の記録と好きな音楽"
+  }
+}

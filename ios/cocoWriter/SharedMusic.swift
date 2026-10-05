@@ -38,8 +38,9 @@ struct SharedMusicRequest: Codable, Identifiable {
 }
 
 enum MusicShareInbox {
-    static let groupID = "group.org.example.cocoWriter"
+    static var groupID: String { AppConfiguration.current.appGroupIdentifier }
     static func directory(bundle: Bundle = .main) -> URL? {
+        guard AppConfiguration.configurationError == nil else { return nil }
         // AltStore rewrites App Group identifiers and records them in ALTAppGroups.
         let rewritten = (bundle.object(forInfoDictionaryKey: "ALTAppGroups") as? [String] ?? [])
             .filter { $0 == groupID || $0.hasPrefix(groupID + ".") }

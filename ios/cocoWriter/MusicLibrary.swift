@@ -22,8 +22,9 @@ import Combine
     private let url: URL
 
     init(url: URL? = nil) {
-        self.url = url ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("cocoWriter/music-library.json")
+        self.url = url ?? AppConfiguration.current.storageURL("music-library.json")
         do {
+            if url == nil, let error = AppConfiguration.configurationError { throw WriterError.message(error) }
             if FileManager.default.fileExists(atPath: self.url.path) {
                 let archive = try JSONDecoder().decode(Archive.self, from: Data(contentsOf: self.url))
                 storedItems = archive.items; migrated = archive.migrated

@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "displayName": "cocoWriter",
+  "bundleIdentifier": "org.example.cocoWriter",
+  "extensionBundleIdentifier": "org.example.cocoWriter.Share",
+  "appGroupIdentifier": "group.org.example.cocoWriter",
+  "storageDirectory": "cocoWriter",
+  "keychainService": "cocoWriter.GitHub",
+  "defaultSite": {
+    "owner": "",
+    "repository": "",
+    "branch": "main",
+    "website": "",
+    "title": "My Journal",
+    "tagline": "日々の記録と好きな音楽"
+  },
+  "blogProfile": "../default.json"
+}
