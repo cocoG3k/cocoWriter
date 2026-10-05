@@ -43,6 +43,7 @@ import SwiftUI
 @MainActor struct ArticleLibraryView: View {
     @EnvironmentObject private var store: DraftStore
     @State private var shelf: ArticleShelf = .drafts
+    @AppStorage("article-filter-mode") private var filterMode: ArticleFilterMode = .tags
     @State private var selectedArticleTag: String?
     @State private var categoryFilter: String?
     @State private var destination: ArticleDestination?
@@ -54,12 +55,15 @@ import SwiftUI
     @State private var message: String?
     private var items: [Draft] {
         ArticleLibrary.items(store.drafts, shelf: shelf, publishedSort: publishedSort)
-            .filter { draft in selectedArticleTag.map { RepositoryArticleMarkdown.tagValues(draft.tags).contains($0) } ?? true }
-            .filter { categoryFilter == nil || store.categoryID(for: $0) == categoryFilter }
+            .filter { draft in
+                switch filterMode {
+                case .categories: return categoryFilter == nil || store.categoryID(for: draft) == categoryFilter
+                case .tags: return selectedArticleTag.map { RepositoryArticleMarkdown.tagValues(draft.tags).contains($0) } ?? true
+                }
+            }
     }
     private var shelfItems: [Draft] {
         ArticleLibrary.items(store.drafts, shelf: shelf)
-            .filter { categoryFilter == nil || store.categoryID(for: $0) == categoryFilter }
     }
     private var articleTags: [String] {
         var tags = Set(shelfItems.flatMap { RepositoryArticleMarkdown.tagValues($0.tags) })
@@ -79,22 +83,37 @@ import SwiftUI
                     HStack(spacing: 7) {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 7) {
-                                filterButton("全て \(shelfItems.count)", active: selectedArticleTag == nil) { selectedArticleTag = nil }
+                                filterButton("全て \(shelfItems.count)", active: filterMode == .categories ? categoryFilter == nil : selectedArticleTag == nil) {
+                                    selectedArticleTag = nil; categoryFilter = nil
+                                }
                                     .accessibilityIdentifier("article-filter-all")
-                                ForEach(articleTags, id: \.self) { tag in
-                                    filterButton("#" + tag + " \(shelfItems.filter { RepositoryArticleMarkdown.tagValues($0.tags).contains(tag) }.count)", active: selectedArticleTag == tag) { selectedArticleTag = tag }
-                                        .accessibilityIdentifier("article-filter-tag-" + tag)
+                                if filterMode == .categories {
+                                    ForEach(store.categories) { category in
+                                        filterButton(category.name + " \(shelfItems.filter { store.categoryID(for: $0) == category.id }.count)", active: categoryFilter == category.id) { categoryFilter = category.id }
+                                            .accessibilityIdentifier("article-filter-category-" + category.id)
+                                    }
+                                } else {
+                                    ForEach(articleTags, id: \.self) { tag in
+                                        filterButton("#" + tag + " \(shelfItems.filter { RepositoryArticleMarkdown.tagValues($0.tags).contains(tag) }.count)", active: selectedArticleTag == tag) { selectedArticleTag = tag }
+                                            .accessibilityIdentifier("article-filter-tag-" + tag)
+                                    }
                                 }
                             }
                         }
                         Spacer(minLength: 0)
                         Menu {
-                            Button("すべてのカテゴリ") { categoryFilter = nil }
-                            ForEach(store.categories) { category in Button(category.name) { categoryFilter = category.id } }
+                            Picker("記事の絞り込み", selection: $filterMode) {
+                                ForEach(ArticleFilterMode.allCases) { mode in Text(mode.label).tag(mode) }
+                            }
                         } label: {
-                            Label(store.categories.first { $0.id == categoryFilter }?.name ?? "カテゴリ", systemImage: "folder")
-                                .font(.caption).lineLimit(1)
-                        }.accessibilityIdentifier("article-category-filter")
+                            HStack(spacing: 4) {
+                                Label(filterMode.label, systemImage: filterMode == .categories ? "folder" : "tag")
+                                Image(systemName: "chevron.down")
+                            }.font(.caption).fixedSize()
+                        }
+                        .accessibilityLabel("絞り込み方法・" + filterMode.label)
+                        .accessibilityHint("カテゴリまたはタグを選べます")
+                        .accessibilityIdentifier("article-filter-mode")
                     }
                     Button { create() } label: { Label("記事を書く", systemImage: "square.and.pencil").font(.subheadline).frame(maxWidth: .infinity, minHeight: 28) }
                         .buttonStyle(.bordered).disabled(!store.loaded || managing || syncing)
@@ -138,7 +157,7 @@ import SwiftUI
                                 .contextMenu {
                                     Button(draft.pinnedAt == nil ? "ピン留め" : "ピン解除", systemImage: "pin") { store.togglePin(draft.id) }
                                     Button("複製して下書きにする", systemImage: "doc.on.doc") {
-                                        if let copy = store.duplicate(draft.id) { shelf = .drafts; selectedArticleTag = nil; destination = .editor(copy) }
+                                        if let copy = store.duplicate(draft.id) { shelf = .drafts; selectedArticleTag = nil; categoryFilter = nil; destination = .editor(copy) }
                                     }.disabled(draft.hasPendingOperation)
                                     if draft.isPublished {
                                         Button("サイトから削除…", systemImage: "trash", role: .destructive) { destination = .deletion(draft.id) }
@@ -190,6 +209,7 @@ import SwiftUI
                     }
                 }
                 .onChange(of: shelf) { _, _ in selection.removeAll() }
+                .onChange(of: filterMode) { _, _ in selectedArticleTag = nil; categoryFilter = nil; selection.removeAll() }
                 .onChange(of: selectedArticleTag) { _, _ in selection.removeAll() }
                 .onChange(of: categoryFilter) { _, _ in selection.removeAll() }
                 .onChange(of: publishedSort) { _, _ in selection.removeAll() }
@@ -233,6 +253,12 @@ import SwiftUI
         if store.moveToTrash(ids) { selection.subtract(ids) }
         else { message = store.storageError ?? "公開・削除結果の確認待ちの記事は、確認が終わるまで移動できません。" }
     }
+}
+
+private enum ArticleFilterMode: String, CaseIterable, Identifiable {
+    case categories, tags
+    var id: String { rawValue }
+    var label: String { self == .categories ? "カテゴリ" : "タグ" }
 }
 
 private enum ArticleDestination: Identifiable {

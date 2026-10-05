@@ -31,6 +31,9 @@ struct MarkdownFile: FileDocument {
     @State private var showReloadConfirmation = false
     @State private var message: String?
     private var publisher: GitHubPublisher { GitHubPublisher(configuration: store.site, profile: draft.publicationProfile) }
+    private var publishDisabled: Bool {
+        publishing || importingImage || draft.pendingDeletionSHA != nil || store.storageError != nil || (draft.pendingMarkdown == nil && draft.validation != nil)
+    }
     var body: some View {
         Form {
             Group {
@@ -122,7 +125,7 @@ struct MarkdownFile: FileDocument {
                 Section {
                     Button { showPublishConfirmation = true } label: {
                         HStack { Label(draft.pendingMarkdown != nil ? "結果を確認・再送" : draft.isPublished ? "変更内容を確認" : "公開内容を確認", systemImage: "arrow.up.doc"); if publishing { Spacer(); ProgressView() } }
-                    }.disabled(publishing || importingImage || draft.pendingDeletionSHA != nil || store.storageError != nil || (draft.pendingMarkdown == nil && draft.validation != nil))
+                    }.disabled(publishDisabled)
                     if let url = draft.commitURL.flatMap(URL.init(string:)) { Link("GitHub のコミットを開く", destination: url) }
                     if let url = store.site.actionsURL { Link("サイトへの反映状況を確認", destination: url) }
                 } footer: { Text("設定したブランチへ保存すると、サイト側の公開処理が始まります。GitHub への保存とサイトへの反映は別です。") }
@@ -134,7 +137,22 @@ struct MarkdownFile: FileDocument {
         .writerChrome().navigationTitle(draft.isPublished ? "記事を編集" : "記事を書く").navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("閉じる") { if store.update(draft) { dismiss() } }.disabled(publishing || importingImage) }
-            ToolbarItem(placement: .primaryAction) { if !draft.music.isEmpty { EditButton().disabled(publishing || draft.hasPendingOperation) } }
+            ToolbarItemGroup(placement: .primaryAction) {
+                if !draft.music.isEmpty { EditButton().disabled(publishing || draft.hasPendingOperation) }
+                Button { showPublishConfirmation = true } label: {
+                    Group {
+                        if publishing { ProgressView().tint(WriterPalette.onAccent) }
+                        else { Image(systemName: "arrow.up").font(.body.weight(.semibold)) }
+                    }.frame(width: 24, height: 24)
+                }
+                .modifier(PublishButtonAppearance())
+                .buttonBorderShape(.circle)
+                .tint(WriterPalette.accent)
+                .foregroundStyle(WriterPalette.onAccent)
+                .disabled(publishDisabled)
+                .accessibilityLabel(draft.pendingMarkdown != nil ? "Push・結果を確認して再送" : "Push・公開内容を確認")
+                .accessibilityIdentifier("article-push")
+            }
         }
         .interactiveDismissDisabled(publishing || importingImage || store.storageError != nil)
         .onChange(of: draft) { _, value in _ = store.update(value) }
@@ -297,6 +315,18 @@ struct MarkdownFile: FileDocument {
         } catch { message = error.localizedDescription }
     }
 }
+private struct PublishButtonAppearance: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26.1, *) {
+            content.buttonStyle(.glass(.regular.tint(WriterPalette.accent)))
+        } else if #available(iOS 26.0, *) {
+            content.buttonStyle(.glassProminent)
+        } else {
+            content.buttonStyle(.borderedProminent)
+        }
+    }
+}
+
 @MainActor private struct ArticleMusicComposer: View {
     @Environment(\.dismiss) private var dismiss
     @State private var item = MusicItem()
