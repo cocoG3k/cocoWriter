@@ -564,8 +564,12 @@ final class WriterTests: XCTestCase {
         let jp = URL(string: "https://music.apple.com/jp/song/222")!, us = URL(string: "https://music.apple.com/us/song/222")!
         let japan = try await resolver.resolve(jp), america = try await resolver.resolve(us)
         XCTAssertNotEqual(japan.metadata.title, america.metadata.title)
+        let countBeforeCache = MultiServiceMusicFixture.count(for: "https://song.link/i/222")
+        _ = try await resolver.resolve(jp)
+        XCTAssertEqual(MultiServiceMusicFixture.count(for: "https://song.link/i/222"), countBeforeCache)
         let refreshed = try await resolver.refresh(jp)
         XCTAssertEqual(refreshed.metadata, japan.metadata)
+        XCTAssertEqual(MultiServiceMusicFixture.count(for: "https://song.link/i/222"), countBeforeCache + 1)
         // Numeric video IDs and Apple IDs may collide; provider is part of the cache key.
         let apple = try await resolver.resolve(URL(string: "https://music.apple.com/us/song/10539348440")!)
         let youtube = try await resolver.resolve(URL(string: "https://music.youtube.com/watch?v=10539348440")!)
@@ -1213,6 +1217,9 @@ private final class DestinationFixture: URLProtocol {
 }
 
 private final class MultiServiceMusicFixture: URLProtocol {
+    private static let lock = NSLock()
+    private static var requests: [String: Int] = [:]
+    static func count(for url: String) -> Int { lock.lock(); defer { lock.unlock() }; return requests[url, default: 0] }
     static func songlink(provider: String, id: String, title: String = "Selfless", type: String = "song") -> String {
         "<script id=\"__NEXT_DATA__\">" + "{\"props\":{\"pageProps\":{\"pageData\":{\"entityData\":{\"provider\":\"\(provider)\",\"id\":\"\(id)\",\"type\":\"\(type)\",\"title\":\"\(title)\",\"artistName\":\"The Strokes\"},\"sections\":[{\"links\":[{\"platform\":\"spotify\",\"url\":\"https://open.spotify.com/track/0123456789ABCDEFGHIJKL\"},{\"platform\":\"spotify\",\"url\":\"https://open.spotify.com/album/0123456789ABCDEFGHIJKL\"}]}]}}}}" + "</script>"
     }
@@ -1220,6 +1227,7 @@ private final class MultiServiceMusicFixture: URLProtocol {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
         let url = request.url!, host = url.host!, id = url.lastPathComponent
+        Self.lock.lock(); Self.requests[url.absoluteString, default: 0] += 1; Self.lock.unlock()
         var final = url, status = 200, text = ""
         let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         func value(_ key: String) -> String { items.first { $0.name == key }?.value ?? "" }

@@ -59,7 +59,12 @@ actor PublicMusicResolver {
         let key = source.cacheKey
         if let cached = cache[key], Date().timeIntervalSince(cached.0) < 600 { return cached.1 }
         if source.isShort {
-            let (_, finalURL) = try await fetch(source.url, sharing: source.service)
+            let finalURL: URL
+            do { (_, finalURL) = try await fetch(source.url, sharing: source.service) }
+            catch {
+                try Task.checkCancellation()
+                throw WriterError.message("短縮URLを展開できませんでした。通信・公開状態や転送先を確認し、曲の元のURLを使うか、手入力・Spotify検索・URL貼り付けで続けてください。")
+            }
             guard let expanded = SharedMusicLink.parse(finalURL.absoluteString), !expanded.isShort, expanded.service == source.service else {
                 throw WriterError.message("短縮URLの転送先から曲を特定できません。曲の元の共有URLを使うか、手入力・Spotify検索で続けてください。")
             }
