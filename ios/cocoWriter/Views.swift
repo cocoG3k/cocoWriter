@@ -151,13 +151,15 @@ struct MarkdownFile: FileDocument {
         .writerChrome().navigationTitle(draft.isPublished ? "記事を編集" : "記事を書く").navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("閉じる") { if store.finishEditing(draft) { dismiss() } }.disabled(publishing || importingImage) }
-            ToolbarItemGroup(placement: .primaryAction) {
-                if !draft.music.isEmpty { EditButton().disabled(publishing || draft.hasPendingOperation) }
+            if !draft.music.isEmpty {
+                ToolbarItem(placement: .primaryAction) { EditButton().disabled(publishing || draft.hasPendingOperation) }
+            }
+            ToolbarItem(placement: .confirmationAction) {
                 Button { showPublishConfirmation = true } label: {
                     Group {
                         if publishing { ProgressView().tint(WriterPalette.onAccent) }
                         else { Image(systemName: "arrow.up").font(.body.weight(.semibold)) }
-                    }.frame(width: 24, height: 24)
+                    }
                 }
                 .modifier(PublishButtonAppearance())
                 .buttonBorderShape(.circle)
@@ -338,9 +340,7 @@ struct MarkdownFile: FileDocument {
 }
 private struct PublishButtonAppearance: ViewModifier {
     func body(content: Content) -> some View {
-        if #available(iOS 26.1, *) {
-            content.buttonStyle(.glass(.regular.tint(WriterPalette.accent)))
-        } else if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, *) {
             content.buttonStyle(.glassProminent)
         } else {
             content.buttonStyle(.borderedProminent)
