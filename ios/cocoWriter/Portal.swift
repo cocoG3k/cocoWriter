@@ -2,6 +2,7 @@ import SwiftUI
 
 @MainActor struct DraftListView: View {
     @EnvironmentObject private var drafts: DraftStore
+    @EnvironmentObject private var privateNotes: PrivateNoteStore
     @EnvironmentObject private var musicLibrary: MusicLibraryStore
     @Environment(\.scenePhase) private var scenePhase
     @State private var tab = 0
@@ -25,10 +26,14 @@ import SwiftUI
             }
         }
         .sheet(item: $editingSharedDraft) { draft in NavigationStack { EditorView(draft: draft) } }
-        .task { receiveMusic() }
+        .task { purgeTrash(); receiveMusic() }
         .onChange(of: drafts.drafts) { _, _ in musicLibrary.reconcile(from: drafts) }
         .onChange(of: drafts.storageError) { _, error in if error == nil { musicLibrary.reconcile(from: drafts) } }
-        .onChange(of: scenePhase) { _, phase in if phase == .active { receiveMusic() } }
+        .onChange(of: scenePhase) { _, phase in if phase == .active { purgeTrash(); receiveMusic() } }
+    }
+    private func purgeTrash() {
+        _ = drafts.purgeExpiredTrash()
+        _ = privateNotes.purgeExpiredTrash(drafts.trashRetention)
     }
     private func receiveMusic() {
         if drafts.loaded { _ = musicLibrary.migrate(from: drafts.drafts) }
@@ -252,9 +257,6 @@ import SwiftUI
     private func create() {
         if let error = store.categorySettingsError { message = error; return }
         let draft = store.newDraft()
-        // A failed disk save still retains the draft in memory. Open its editor so
-        // the save error and retry action are visible instead of dropping the tap.
-        _ = store.update(draft)
         shelf = .drafts; selectedArticleTag = nil; categoryFilter = nil
         destination = .editor(draft)
     }
