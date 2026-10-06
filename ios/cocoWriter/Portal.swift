@@ -70,6 +70,15 @@ import SwiftUI
         if let selectedArticleTag { tags.insert(selectedArticleTag) }
         return tags.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
+    private func filterLabel(for draft: Draft) -> String {
+        switch filterMode {
+        case .categories:
+            return store.categoryLabel(for: draft)
+        case .tags:
+            let tags = RepositoryArticleMarkdown.tagValues(draft.tags)
+            return tags.isEmpty ? "タグなし" : tags.map { "#" + $0 }.joined(separator: " ")
+        }
+    }
     private var trashCount: Int { store.drafts.filter { $0.deletedAt != nil }.count }
     private var publisher: GitHubPublisher { GitHubPublisher(configuration: store.site) }
     var body: some View {
@@ -139,10 +148,10 @@ import SwiftUI
                                 else if draft.pendingDeletionSHA != nil { destination = .deletion(draft.id) }
                                 else { destination = .editor(draft) }
                             } label: {
-                                CompactArticleRow(draft: draft, category: store.categoryLabel(for: draft), selecting: managing, selected: selection.contains(draft.id))
+                                CompactArticleRow(draft: draft, detail: filterLabel(for: draft), selecting: managing, selected: selection.contains(draft.id))
                             }.buttonStyle(.plain).disabled(syncing).listRowInsets(EdgeInsets(top: 7, leading: 16, bottom: 7, trailing: 16))
                                 .accessibilityIdentifier("article-row-" + draft.id.uuidString)
-                                .accessibilityLabel("\(draft.displayTitle)、\(store.categoryLabel(for: draft))、\(draft.pendingMarkdown != nil ? "送信結果の確認待ち" : shelf.label)")
+                                .accessibilityLabel("\(draft.displayTitle)、\(filterLabel(for: draft))、\(draft.pendingMarkdown != nil ? "送信結果の確認待ち" : shelf.label)")
                                 .accessibilityValue(selection.contains(draft.id) ? "選択済み" : "")
                                 .swipeActions(edge: .trailing, allowsFullSwipe: shelf == .drafts) {
                                     if shelf == .published {
@@ -274,7 +283,7 @@ private enum ArticleDestination: Identifiable {
 
 private struct CompactArticleRow: View {
     let draft: Draft
-    let category: String
+    let detail: String
     var selecting = false
     var selected = false
     var body: some View {
@@ -286,7 +295,7 @@ private struct CompactArticleRow: View {
                     if draft.pinnedAt != nil { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(WriterPalette.secondary) }
                 }
                 HStack(spacing: 6) {
-                    Text(category).lineLimit(1)
+                    Text(detail).lineLimit(1)
                     Text(draft.isPublished ? draft.date : draft.updatedAt, format: .dateTime.month().day())
                     if draft.pendingMarkdown != nil { Text("結果確認待ち").foregroundStyle(.orange) }
                     else if draft.pendingDeletionSHA != nil { Text("削除確認待ち").foregroundStyle(.orange) }
@@ -397,7 +406,7 @@ private struct CompactArticleRow: View {
                     if items.isEmpty { Text("ゴミ箱は空です").foregroundStyle(WriterPalette.secondary) }
                     ForEach(items) { draft in
                         VStack(alignment: .leading, spacing: 5) {
-                            CompactArticleRow(draft: draft, category: store.categoryLabel(for: draft))
+                            CompactArticleRow(draft: draft, detail: store.categoryLabel(for: draft))
                             HStack {
                                 Button("復元") { store.restore(draft.id) }.accessibilityIdentifier("restore-article-" + draft.id.uuidString)
                                 Spacer()
