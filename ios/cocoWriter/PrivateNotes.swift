@@ -169,7 +169,9 @@ enum PrivateNoteTimeline {
     private(set) var tagsLoaded = false
     private let url: URL
     private let tagURL: URL
-    init(url: URL? = nil, tagURL: URL? = nil) {
+    private let preferences: UserDefaults
+    init(url: URL? = nil, tagURL: URL? = nil, preferences: UserDefaults = .standard) {
+        self.preferences = preferences
         self.url = url ?? AppConfiguration.current.storageURL("private-notes.json")
         self.tagURL = tagURL ?? self.url.deletingLastPathComponent().appendingPathComponent("private-note-tags.json")
         do {
@@ -182,6 +184,7 @@ enum PrivateNoteTimeline {
             if FileManager.default.fileExists(atPath: self.tagURL.path) { tagCatalog = try JSONDecoder().decode(NoteTagCatalog.self, from: Data(contentsOf: self.tagURL)) }
             tagsLoaded = true
         } catch { tagStorageError = "タグの設定を読み込めません。元ファイルを保護するため変更を停止しました。\(error.localizedDescription)" }
+        _ = purgeExpiredTrash()
         removeUnusedTags()
     }
     var active: [PrivateNote] {
@@ -192,6 +195,14 @@ enum PrivateNoteTimeline {
     }
     var trash: [PrivateNote] { notes.filter { $0.deletedAt != nil }.sorted { $0.deletedAt! > $1.deletedAt! } }
     var tags: [String] { tagCatalog.visible(in: active) }
+
+    @discardableResult func purgeExpiredTrash(_ retention: TrashRetentionPeriod? = nil, now: Date = Date()) -> Int {
+        let retention = retention ?? TrashRetentionPeriod.load(from: preferences)
+        guard loaded, storageError == nil, retention != .never else { return 0 }
+        let expired = Set(notes.filter { $0.deletedAt.map { retention.isExpired($0, now: now) } == true }.map(\.id))
+        guard !expired.isEmpty, commit(notes.filter { !expired.contains($0.id) }) else { return 0 }
+        return expired.count
+    }
 
     @discardableResult func hideTag(_ tag: String) -> Bool {
         guard loaded, tagsLoaded, tags.contains(where: { NoteTags.key($0) == NoteTags.key(tag) }) else { return false }

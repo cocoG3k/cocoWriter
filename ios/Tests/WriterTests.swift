@@ -61,6 +61,49 @@ final class WriterTests: XCTestCase {
         XCTAssertTrue(store.deletePermanently(copy.id))
         XCTAssertEqual(DraftStore(url: url).drafts.map(\.id), [published.id])
     }
+    @MainActor func testEmptyNewArticleIsNotKeptWhenEditingEnds() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let url = folder.appendingPathComponent("drafts.json"), store = DraftStore(url: url)
+        let empty = store.newDraft()
+        XCTAssertTrue(store.finishEditing(empty)); XCTAssertTrue(store.drafts.isEmpty)
+        var written = empty; written.body = "書きかけ"
+        XCTAssertTrue(store.update(written)); XCTAssertEqual(store.drafts.map(\.id), [empty.id])
+        written.body = ""
+        XCTAssertTrue(store.finishEditing(written)); XCTAssertTrue(store.drafts.isEmpty)
+        XCTAssertTrue(DraftStore(url: url).drafts.isEmpty)
+        var published = empty; published.remoteSHA = "remote"
+        XCTAssertTrue(store.finishEditing(published)); XCTAssertEqual(store.drafts.map(\.id), [empty.id])
+    }
+    @MainActor func testTrashRetentionPurgesArticlesAndNotesAndCanBeDisabled() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let suite = UUID().uuidString, defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defaults.set(TrashRetentionPeriod.never.rawValue, forKey: TrashRetentionPeriod.defaultsKey)
+        let now = Date()
+        var oldArticle = Draft(kind: .diary); oldArticle.title = "期限切れ"; oldArticle.deletedAt = now.addingTimeInterval(-8 * 86_400)
+        var recentArticle = Draft(kind: .diary); recentArticle.title = "復元可能"; recentArticle.deletedAt = now.addingTimeInterval(-6 * 86_400)
+        let articleURL = folder.appendingPathComponent("drafts.json")
+        try JSONEncoder().encode([oldArticle, recentArticle]).write(to: articleURL)
+        let articles = DraftStore(url: articleURL, preferences: defaults)
+        XCTAssertEqual(articles.saveTrashRetention(.sevenDays, now: now), 1)
+        XCTAssertEqual(articles.drafts.map(\.id), [recentArticle.id])
+
+        var oldNote = PrivateNote(); oldNote.body = "期限切れ"; oldNote.deletedAt = now.addingTimeInterval(-8 * 86_400)
+        var recentNote = PrivateNote(); recentNote.body = "復元可能"; recentNote.deletedAt = now.addingTimeInterval(-6 * 86_400)
+        let noteURL = folder.appendingPathComponent("notes.json")
+        try JSONEncoder().encode([oldNote, recentNote]).write(to: noteURL)
+        defaults.set(TrashRetentionPeriod.never.rawValue, forKey: TrashRetentionPeriod.defaultsKey)
+        let notes = PrivateNoteStore(url: noteURL, preferences: defaults)
+        XCTAssertEqual(notes.purgeExpiredTrash(.sevenDays, now: now), 1)
+        XCTAssertEqual(notes.notes.map(\.id), [recentNote.id])
+
+        XCTAssertEqual(articles.saveTrashRetention(.never, now: now.addingTimeInterval(100 * 86_400)), 0)
+        XCTAssertEqual(notes.purgeExpiredTrash(.never, now: now.addingTimeInterval(100 * 86_400)), 0)
+        XCTAssertEqual(TrashRetentionPeriod.load(from: defaults), .never)
+    }
     @MainActor func testPendingDraftCannotBeDeletedAndFailedDeleteRollsBack() throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: folder) }

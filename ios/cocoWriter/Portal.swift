@@ -2,6 +2,7 @@ import SwiftUI
 
 @MainActor struct DraftListView: View {
     @EnvironmentObject private var drafts: DraftStore
+    @EnvironmentObject private var privateNotes: PrivateNoteStore
     @EnvironmentObject private var musicLibrary: MusicLibraryStore
     @Environment(\.scenePhase) private var scenePhase
     @State private var tab = 0
@@ -25,10 +26,14 @@ import SwiftUI
             }
         }
         .sheet(item: $editingSharedDraft) { draft in NavigationStack { EditorView(draft: draft) } }
-        .task { receiveMusic() }
+        .task { purgeTrash(); receiveMusic() }
         .onChange(of: drafts.drafts) { _, _ in musicLibrary.reconcile(from: drafts) }
         .onChange(of: drafts.storageError) { _, error in if error == nil { musicLibrary.reconcile(from: drafts) } }
-        .onChange(of: scenePhase) { _, phase in if phase == .active { receiveMusic() } }
+        .onChange(of: scenePhase) { _, phase in if phase == .active { purgeTrash(); receiveMusic() } }
+    }
+    private func purgeTrash() {
+        _ = drafts.purgeExpiredTrash()
+        _ = privateNotes.purgeExpiredTrash(drafts.trashRetention)
     }
     private func receiveMusic() {
         if drafts.loaded { _ = musicLibrary.migrate(from: drafts.drafts) }
@@ -69,6 +74,15 @@ import SwiftUI
         var tags = Set(shelfItems.flatMap { RepositoryArticleMarkdown.tagValues($0.tags) })
         if let selectedArticleTag { tags.insert(selectedArticleTag) }
         return tags.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+    private func filterLabel(for draft: Draft) -> String {
+        switch filterMode {
+        case .categories:
+            return store.categoryLabel(for: draft)
+        case .tags:
+            let tags = RepositoryArticleMarkdown.tagValues(draft.tags)
+            return tags.isEmpty ? "タグなし" : tags.map { "#" + $0 }.joined(separator: " ")
+        }
     }
     private var trashCount: Int { store.drafts.filter { $0.deletedAt != nil }.count }
     private var publisher: GitHubPublisher { GitHubPublisher(configuration: store.site) }
@@ -139,10 +153,10 @@ import SwiftUI
                                 else if draft.pendingDeletionSHA != nil { destination = .deletion(draft.id) }
                                 else { destination = .editor(draft) }
                             } label: {
-                                CompactArticleRow(draft: draft, category: store.categoryLabel(for: draft), selecting: managing, selected: selection.contains(draft.id))
+                                CompactArticleRow(draft: draft, detail: filterLabel(for: draft), selecting: managing, selected: selection.contains(draft.id))
                             }.buttonStyle(.plain).disabled(syncing).listRowInsets(EdgeInsets(top: 7, leading: 16, bottom: 7, trailing: 16))
                                 .accessibilityIdentifier("article-row-" + draft.id.uuidString)
-                                .accessibilityLabel("\(draft.displayTitle)、\(store.categoryLabel(for: draft))、\(draft.pendingMarkdown != nil ? "送信結果の確認待ち" : shelf.label)")
+                                .accessibilityLabel("\(draft.displayTitle)、\(filterLabel(for: draft))、\(draft.pendingMarkdown != nil ? "送信結果の確認待ち" : shelf.label)")
                                 .accessibilityValue(selection.contains(draft.id) ? "選択済み" : "")
                                 .swipeActions(edge: .trailing, allowsFullSwipe: shelf == .drafts) {
                                     if shelf == .published {
@@ -243,9 +257,6 @@ import SwiftUI
     private func create() {
         if let error = store.categorySettingsError { message = error; return }
         let draft = store.newDraft()
-        // A failed disk save still retains the draft in memory. Open its editor so
-        // the save error and retry action are visible instead of dropping the tap.
-        _ = store.update(draft)
         shelf = .drafts; selectedArticleTag = nil; categoryFilter = nil
         destination = .editor(draft)
     }
@@ -274,7 +285,7 @@ private enum ArticleDestination: Identifiable {
 
 private struct CompactArticleRow: View {
     let draft: Draft
-    let category: String
+    let detail: String
     var selecting = false
     var selected = false
     var body: some View {
@@ -286,7 +297,7 @@ private struct CompactArticleRow: View {
                     if draft.pinnedAt != nil { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(WriterPalette.secondary) }
                 }
                 HStack(spacing: 6) {
-                    Text(category).lineLimit(1)
+                    Text(detail).lineLimit(1)
                     Text(draft.isPublished ? draft.date : draft.updatedAt, format: .dateTime.month().day())
                     if draft.pendingMarkdown != nil { Text("結果確認待ち").foregroundStyle(.orange) }
                     else if draft.pendingDeletionSHA != nil { Text("削除確認待ち").foregroundStyle(.orange) }
@@ -397,7 +408,7 @@ private struct CompactArticleRow: View {
                     if items.isEmpty { Text("ゴミ箱は空です").foregroundStyle(WriterPalette.secondary) }
                     ForEach(items) { draft in
                         VStack(alignment: .leading, spacing: 5) {
-                            CompactArticleRow(draft: draft, category: store.categoryLabel(for: draft))
+                            CompactArticleRow(draft: draft, detail: store.categoryLabel(for: draft))
                             HStack {
                                 Button("復元") { store.restore(draft.id) }.accessibilityIdentifier("restore-article-" + draft.id.uuidString)
                                 Spacer()

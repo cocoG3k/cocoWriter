@@ -150,7 +150,7 @@ struct MarkdownFile: FileDocument {
         .scrollDismissesKeyboard(.interactively)
         .writerChrome().navigationTitle(draft.isPublished ? "記事を編集" : "記事を書く").navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) { Button("閉じる") { if store.update(draft) { dismiss() } }.disabled(publishing || importingImage) }
+            ToolbarItem(placement: .cancellationAction) { Button("閉じる") { if store.finishEditing(draft) { dismiss() } }.disabled(publishing || importingImage) }
             ToolbarItemGroup(placement: .primaryAction) {
                 if !draft.music.isEmpty { EditButton().disabled(publishing || draft.hasPendingOperation) }
                 Button { showPublishConfirmation = true } label: {
@@ -177,6 +177,7 @@ struct MarkdownFile: FileDocument {
                 try draft.setExtraHeader(key, value: value)
             } onDelete: { }
         }
+        .onDisappear { if !publishing && !importingImage { _ = store.finishEditing(draft) } }
         .sheet(isPresented: $photos) {
             ArticlePhotoPicker(started: { importingImage = true; photos = false }, completion: { result in
                 photos = false
@@ -605,6 +606,7 @@ private struct PublishButtonAppearance: ViewModifier {
 }
 @MainActor struct SettingsView: View {
     @EnvironmentObject private var store: DraftStore
+    @EnvironmentObject private var privateNotes: PrivateNoteStore
     @State private var connection = SiteConfiguration()
     @State private var token = ""
     @State private var message = ""
@@ -667,6 +669,17 @@ private struct PublishButtonAppearance: ViewModifier {
                         Text("未投稿・編集中・送信結果の確認待ちの写真は残します。元の写真アプリの画像は変更しません。").font(.caption).foregroundStyle(WriterPalette.secondary)
                         if !message.isEmpty { Text(message).font(.caption) }
                     }
+                    Section {
+                        Picker("完全に削除するまで", selection: Binding(get: { store.trashRetention }, set: { value in
+                            let articles = store.saveTrashRetention(value)
+                            let notes = privateNotes.purgeExpiredTrash(value)
+                            message = articles + notes > 0 ? "期限を過ぎた項目を\(articles + notes)件削除しました。" : "ゴミ箱の保存期間を変更しました。"
+                        })) {
+                            ForEach(TrashRetentionPeriod.allCases) { period in Text(period.label).tag(period) }
+                        }.accessibilityIdentifier("settings-trash-retention")
+                        Text("記事と自分用メモに共通です。期限を過ぎた項目は、アプリ起動時と設定変更時に端末から完全に削除します。公開サイトの記事は削除しません。")
+                            .font(.caption).foregroundStyle(WriterPalette.secondary)
+                    } header: { Text("ゴミ箱") }
                 }.listRowBackground(WriterPalette.surface)
             }.writerCanvas().writerChrome().navigationTitle("設定").navigationBarTitleDisplayMode(.inline).environment(\.defaultMinListRowHeight, 36)
                 .onAppear { connection = store.site }

@@ -99,6 +99,14 @@ struct Draft: Codable, Identifiable, Equatable {
         return attachedImages.filter { paths.contains($0.publicPath) }
     }
     var displayTitle: String { title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "無題の\(kind.label)" : title }
+    var isEmptyUnpublishedDraft: Bool {
+        remoteDestination == nil && remoteSHA == nil && repositoryPath == nil && repositorySource == nil &&
+        pendingMarkdown == nil && pendingDeletionSHA == nil && commitURL == nil && imageCommitSHA == nil &&
+        title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        tags.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && music.isEmpty && attachedImages.isEmpty
+    }
     // Independent of editable title/date, and unchanged for this draft's lifetime.
     var filename: String { (path as NSString).lastPathComponent }
     var path: String { repositoryPath ?? profile.articlePath(id: id, date: date) }
@@ -140,6 +148,34 @@ struct Draft: Codable, Identifiable, Equatable {
     }
     static func heading(_ value: String) -> String {
         value.replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "\r", with: " ").map { "\\`*_{}[]<>#!|".contains($0) ? "\\\($0)" : String($0) }.joined()
+    }
+}
+
+enum TrashRetentionPeriod: String, CaseIterable, Identifiable {
+    case sevenDays, thirtyDays, ninetyDays, never
+    static let defaultsKey = "trash-retention-period"
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .sevenDays: return "1週間"
+        case .thirtyDays: return "30日"
+        case .ninetyDays: return "90日"
+        case .never: return "自動削除しない"
+        }
+    }
+    var days: Int? {
+        switch self {
+        case .sevenDays: return 7
+        case .thirtyDays: return 30
+        case .ninetyDays: return 90
+        case .never: return nil
+        }
+    }
+    static func load(from preferences: UserDefaults) -> Self {
+        preferences.string(forKey: defaultsKey).flatMap(Self.init(rawValue:)) ?? .sevenDays
+    }
+    func isExpired(_ deletedAt: Date, now: Date) -> Bool {
+        days.map { deletedAt <= now.addingTimeInterval(-Double($0) * 24 * 60 * 60) } ?? false
     }
 }
 struct RepositorySource: Codable, Equatable {

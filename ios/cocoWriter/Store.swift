@@ -9,6 +9,7 @@ import Combine
     @Published private(set) var categories: [ArticleCategory]
     @Published private(set) var categorySettingsError: String?
     @Published private(set) var tagSuggestions: [String]
+    @Published private(set) var trashRetention: TrashRetentionPeriod
     func saveTagSuggestions(_ values: [String]) throws {
         let tags = try ArticleTags.normalized(values)
         preferences.set(try JSONEncoder().encode(tags), forKey: ArticleTags.defaultsKey)
@@ -64,6 +65,7 @@ import Combine
         self.preferences = preferences
         self.site = SiteConfiguration.load(from: preferences, fallback: .configuredDefault(configuration))
         self.categories = ArticleCategory.initial
+        self.trashRetention = TrashRetentionPeriod.load(from: preferences)
         self.tagSuggestions = (preferences.data(forKey: ArticleTags.defaultsKey).flatMap { try? JSONDecoder().decode([String].self, from: $0) }).flatMap { try? ArticleTags.normalized($0) } ?? ArticleTags.initial
         if let bytes = preferences.data(forKey: ArticleCategory.defaultsKey) {
             do {
@@ -86,7 +88,30 @@ import Combine
                 }
             }
             loaded = true
+            _ = purgeExpiredTrash()
         } catch { storageError = "下書きを読み込めません。元ファイルを保護するため保存を停止しました。\(error.localizedDescription)" }
+    }
+    @discardableResult func finishEditing(_ draft: Draft) -> Bool {
+        guard loaded else { return false }
+        guard draft.isEmptyUnpublishedDraft else { return update(draft) }
+        guard drafts.contains(where: { $0.id == draft.id }) else { return true }
+        guard commitManagement(drafts.filter { $0.id != draft.id }) else { return false }
+        removeUnreferencedImageFiles()
+        return true
+    }
+    func saveTrashRetention(_ value: TrashRetentionPeriod, now: Date = Date()) -> Int {
+        preferences.set(value.rawValue, forKey: TrashRetentionPeriod.defaultsKey)
+        trashRetention = value
+        return purgeExpiredTrash(now: now)
+    }
+    @discardableResult func purgeExpiredTrash(now: Date = Date()) -> Int {
+        guard loaded, storageError == nil, trashRetention != .never else { return 0 }
+        let expired = Set(drafts.filter { draft in
+            draft.deletedAt.map { trashRetention.isExpired($0, now: now) } == true && !draft.hasPendingOperation
+        }.map(\.id))
+        guard !expired.isEmpty, commitManagement(drafts.filter { !expired.contains($0.id) }) else { return 0 }
+        removeUnreferencedImageFiles()
+        return expired.count
     }
     @discardableResult func update(_ draft: Draft) -> Bool {
         guard loaded else { return false }

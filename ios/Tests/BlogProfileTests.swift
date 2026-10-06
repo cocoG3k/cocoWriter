@@ -108,6 +108,9 @@ final class BlogProfileTests: XCTestCase {
             profile.frontMatter.fields.tags = "categories"
             profile.frontMatter.extra = ["draft": .bool(false), "layout": .string("post"), "weight": .number(10), "aliases": .strings(["/old/"])]
             let original = draft(profile)
+            let dateLine = original.markdown.split(separator: "\n").first { $0.hasPrefix("date") || $0.hasPrefix("  \"date\"") }.map(String.init)
+            if format == .json { XCTAssertTrue(dateLine?.hasPrefix("  \"date\": \"") == true) }
+            else { XCTAssertTrue(dateLine?.hasPrefix("date" + (format == .toml ? " = 2026-" : ": 2026-")) == true) }
             XCTAssertFalse(original.markdown.contains(#"\/old\/"#))
             var imported = try RepositoryArticleMarkdown.decode(path: original.path, sha: "old", markdown: original.markdown, profile: profile)
             XCTAssertEqual(imported.markdown, original.markdown)
@@ -118,6 +121,11 @@ final class BlogProfileTests: XCTestCase {
             XCTAssertEqual(edited.title, imported.title); XCTAssertEqual(edited.body, imported.body)
             XCTAssertTrue(edited.markdown.contains("layout")); XCTAssertTrue(edited.markdown.contains("aliases")); XCTAssertTrue(edited.markdown.contains("draft"))
         }
+    }
+    func testYAMLDateIsEmittedAsTypedScalar() {
+        let markdown = draft(.standard).markdown
+        XCTAssertTrue(markdown.contains("\ndate: 2026-10-05\n"))
+        XCTAssertFalse(markdown.contains("\ndate: \"2026-10-05\"\n"))
     }
     func testTOMLRootFieldsAndUnknownTablesRemainSeparate() throws {
         var profile = BlogProfile.standard; profile.articleDirectory = "content/posts"; profile.frontMatter.requireDescription = false

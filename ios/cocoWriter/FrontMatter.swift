@@ -208,26 +208,35 @@ enum RepositoryArticleMarkdown {
         }
         return result
     }
-    private static func values(_ draft: Draft) -> [(String, BlogProfile.Value)] {
+    private struct OutputField {
+        var key: String
+        var value: BlogProfile.Value
+        var isDate = false
+    }
+    private static func values(_ draft: Draft) -> [OutputField] {
         let profile = draft.profile, fields = profile.frontMatter.fields
-        var result: [(String, BlogProfile.Value)] = [(fields.title, .string(draft.title))]
-        if let key = fields.description { result.append((key, .string(draft.description))) }
-        result.append((fields.date, .string(profile.dateText(draft.date))))
-        if let key = fields.tags { result.append((key, .strings(tagValues(draft.tags)))) }
+        var result = [OutputField(key: fields.title, value: .string(draft.title))]
+        if let key = fields.description { result.append(OutputField(key: key, value: .string(draft.description))) }
+        result.append(OutputField(key: fields.date, value: .string(profile.dateText(draft.date)), isDate: true))
+        if let key = fields.tags { result.append(OutputField(key: key, value: .strings(tagValues(draft.tags)))) }
         return result
     }
-    private static func line(_ key: String, _ value: BlogProfile.Value, format: BlogProfile.Format) -> String {
-        // Quoted dates work in YAML, TOML, and JSON; keys are validated identifiers.
-        key + (format == .toml ? " = " : ": ") + value.literal
+    private static func line(_ field: OutputField, format: BlogProfile.Format) -> String {
+        // YAML and TOML must keep dates typed for consumers such as Astro/Zod.
+        // JSON has no date scalar, so its representation remains a string.
+        let literal: String
+        if field.isDate, format != .json, case .string(let date) = field.value { literal = date }
+        else { literal = field.value.literal }
+        return field.key + (format == .toml ? " = " : ": ") + literal
     }
     static func newHeader(_ draft: Draft) -> String {
         let profile = draft.profile
-        let fields = values(draft) + draft.extraHeaderFields.sorted { $0.key < $1.key }.map { ($0.key, $0.value) }
+        let fields = values(draft) + draft.extraHeaderFields.sorted { $0.key < $1.key }.map { OutputField(key: $0.key, value: $0.value) }
         if profile.frontMatter.format == .json {
-            return "{\n" + fields.map { "  " + Draft.yaml($0.0) + ": " + $0.1.literal }.joined(separator: ",\n") + "\n}\n"
+            return "{\n" + fields.map { "  " + Draft.yaml($0.key) + ": " + $0.value.literal }.joined(separator: ",\n") + "\n}\n"
         }
         let delimiter = profile.frontMatter.format == .toml ? "+++" : "---"
-        return delimiter + "\n" + fields.map { line($0.0, $0.1, format: profile.frontMatter.format) }.joined(separator: "\n") + "\n" + delimiter + "\n"
+        return delimiter + "\n" + fields.map { line($0, format: profile.frontMatter.format) }.joined(separator: "\n") + "\n" + delimiter + "\n"
     }
     static func render(_ draft: Draft, source: RepositorySource) -> String {
         guard let parsed = try? parts(source.markdown) else { return source.markdown }
@@ -241,21 +250,21 @@ enum RepositoryArticleMarkdown {
         let originals = extraFields(source.markdown, profile: draft.profile)
         let extras = (draft.extraHeaderEdits ?? [:]).filter { originals[$0.key] != $0.value }.sorted { $0.key < $1.key }
         if changed.isEmpty && extras.isEmpty { return parsed.prefix + draft.body }
-        let updates = values(draft).filter { changed.contains($0.0) } + extras.map { ($0.key, $0.value) }
+        let updates = values(draft).filter { changed.contains($0.key) } + extras.map { OutputField(key: $0.key, value: $0.value) }
         if var object = parsed.object {
-            for (key, value) in updates { object[key] = try? JSONSerialization.jsonObject(with: Data(value.literal.utf8), options: .fragmentsAllowed) }
+            for field in updates { object[field.key] = try? JSONSerialization.jsonObject(with: Data(field.value.literal.utf8), options: .fragmentsAllowed) }
             guard let bytes = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]), let header = String(data: bytes, encoding: .utf8) else { return source.markdown }
             return header.replacingOccurrences(of: "\n", with: parsed.newline) + parsed.newline + draft.body
         }
         var lines = parsed.header.components(separatedBy: parsed.newline)
-        for (key, value) in updates {
-            guard let existing = try? field(key, lines: lines, format: parsed.format) else {
+        for update in updates {
+            guard let existing = try? field(update.key, lines: lines, format: parsed.format) else {
                 // Insert before the first TOML table, so it remains a root field.
                 let index = parsed.format == .toml ? (lines.firstIndex { $0.trimmingCharacters(in: .whitespaces).hasPrefix("[") } ?? lines.count) : lines.count
-                lines.insert(line(key, value, format: parsed.format), at: index)
+                lines.insert(line(update, format: parsed.format), at: index)
                 continue
             }
-            lines.replaceSubrange(existing, with: [line(key, value, format: parsed.format)])
+            lines.replaceSubrange(existing, with: [line(update, format: parsed.format)])
         }
         let delimiter = parsed.format == .toml ? "+++" : "---"
         return delimiter + parsed.newline + lines.joined(separator: parsed.newline) + parsed.newline + delimiter + parsed.newline + draft.body
