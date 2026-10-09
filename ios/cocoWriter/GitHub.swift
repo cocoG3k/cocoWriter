@@ -341,10 +341,20 @@ actor GitHubPublisher {
             // Reading blobs by SHA keeps every body consistent with this tree,
             // even if another client changes main during the refresh.
             guard entry.sha.count == 40, entry.sha.allSatisfy({ $0.isHexDigit }) else { throw WriterError.message("記事のバージョンを確認できません。") }
-            let blob = try JSONDecoder().decode(RemoteFile.self, from: await readAPI(["git", "blobs", entry.sha], token: token))
-            guard blob.sha == entry.sha, blob.encoding == "base64", let encoded = blob.content,
-                  let bytes = Data(base64Encoded: encoded, options: .ignoreUnknownCharacters), let markdown = String(data: bytes, encoding: .utf8) else {
-                throw WriterError.message("記事「\(entry.path)」の本文を取得できません。")
+            let markdown: String
+            // Only reuse the saved remote snapshot, never the locally edited article.
+            // Verify the Git blob hash as pending sends can leave an older snapshot.
+            let snapshot = saved?.repositorySource?.markdown ?? saved?.publishedMarkdown
+            if saved?.remoteSHA == entry.sha, let snapshot,
+               PublicJPEG.blobSHA(Data(snapshot.utf8)) == entry.sha {
+                markdown = snapshot
+            } else {
+                let blob = try JSONDecoder().decode(RemoteFile.self, from: await readAPI(["git", "blobs", entry.sha], token: token))
+                guard blob.sha == entry.sha, blob.encoding == "base64", let encoded = blob.content,
+                      let bytes = Data(base64Encoded: encoded, options: .ignoreUnknownCharacters), let text = String(data: bytes, encoding: .utf8) else {
+                    throw WriterError.message("記事「\(entry.path)」の本文を取得できません。")
+                }
+                markdown = text
             }
             var article = try RepositoryArticleMarkdown.decode(path: entry.path, sha: entry.sha, markdown: markdown, profile: articleProfile, configuration: configuration)
             if let category {

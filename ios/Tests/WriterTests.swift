@@ -492,7 +492,8 @@ final class WriterTests: XCTestCase {
         XCTAssertFalse(html.contains("<script>"))
         XCTAssertFalse(html.contains("href=\"javascript:"))
         var draft = Draft(kind: .diary); draft.title = "<秘密>&\""
-        let preview = BlogPreviewHTML.document(draft)
+        // Exercise the default shell independently of a locally bundled site theme.
+        let preview = BlogPreviewHTML.document(draft, template: "")
         XCTAssertTrue(preview.contains("&lt;秘密&gt;&amp;&quot;"))
         XCTAssertTrue(preview.contains("下書きプレビュー · 未公開"))
     }
