@@ -365,6 +365,54 @@ final class ArticleCategoryTests: XCTestCase {
         XCTAssertThrowsError(try reopened.saveCategories(changed.map { var value = $0; value.isEnabled = false; return value }))
         XCTAssertThrowsError(try reopened.saveCategories(ArticleCategory.initial + ArticleCategory.initial))
     }
+    func testRefreshOnlyFetchesNewOrChangedArticleBodies() async throws {
+        let token = UUID().uuidString
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [CategoryFixtureProtocol.self]
+        let publisher = GitHubPublisher(configuration: site, session: URLSession(configuration: config))
+        let categories = ArticleCategory.initial + [journey]
+        let initial = try await publisher.publishedArticles(token: token, categories: categories)
+        XCTAssertEqual(CategoryFixtureProtocol.blobCount(token), 2)
+        var edited = initial
+        edited[0].title = "Local edits"; edited[0].body = "Do not upload or discard"
+        try edited[0].setExtraHeader("draft", value: .bool(true))
+        let refreshed = try await publisher.publishedArticles(token: token, categories: categories, knownArticles: edited)
+        XCTAssertEqual(CategoryFixtureProtocol.blobCount(token), 2)
+        XCTAssertEqual(refreshed.map(\.markdown), initial.map(\.markdown))
+        var changed = initial
+        changed[0].remoteSHA = String(repeating: "0", count: 40)
+        _ = try await publisher.publishedArticles(token: token, categories: categories, knownArticles: changed)
+        XCTAssertEqual(CategoryFixtureProtocol.blobCount(token), 3)
+        var damaged = initial
+        damaged[0].repositorySource?.markdown += "stale snapshot"
+        _ = try await publisher.publishedArticles(token: token, categories: categories, knownArticles: damaged)
+        XCTAssertEqual(CategoryFixtureProtocol.blobCount(token), 4)
+        var legacy = initial
+        legacy[0].publishedMarkdown = legacy[0].repositorySource?.markdown
+        legacy[0].repositorySource = nil
+        _ = try await publisher.publishedArticles(token: token, categories: categories, knownArticles: legacy)
+        XCTAssertEqual(CategoryFixtureProtocol.blobCount(token), 4)
+        legacy[0].publishedMarkdown = nil
+        _ = try await publisher.publishedArticles(token: token, categories: categories, knownArticles: legacy)
+        XCTAssertEqual(CategoryFixtureProtocol.blobCount(token), 5)
+        var otherDestination = initial
+        otherDestination[0].remoteDestination = "other/repo@main"
+        _ = try await publisher.publishedArticles(token: token, categories: categories, knownArticles: otherDestination)
+        XCTAssertEqual(CategoryFixtureProtocol.blobCount(token), 6)
+        let withNewArticle = try await publisher.publishedArticles(token: token, categories: categories, knownArticles: [initial[0]])
+        XCTAssertEqual(withNewArticle.count, 2)
+        XCTAssertEqual(CategoryFixtureProtocol.blobCount(token), 7)
+        var pending = initial
+        pending[0].pendingMarkdown = "Unconfirmed send"
+        pending[0].pendingDeletionSHA = pending[0].remoteSHA
+        _ = try await publisher.publishedArticles(token: token, categories: categories, knownArticles: pending)
+        XCTAssertEqual(CategoryFixtureProtocol.blobCount(token), 7)
+        var disabledCategories = categories
+        disabledCategories[1].isEnabled = false
+        let filtered = try await publisher.publishedArticles(token: token, categories: disabledCategories, knownArticles: initial)
+        XCTAssertEqual(filtered.count, 1)
+        XCTAssertEqual(CategoryFixtureProtocol.blobCount(token), 7)
+    }
     func testRuntimeArticleFormatsAndFieldsRoundTripWithoutRebuilding() throws {
         for format in [BlogProfile.Format.yaml, .toml, .json] {
             var category = journey
@@ -504,12 +552,22 @@ final class ArticleCategoryTests: XCTestCase {
 }
 
 private final class CategoryFixtureProtocol: URLProtocol {
+    private static let lock = NSLock()
+    private static var blobCounts: [String: Int] = [:]
+    static func blobCount(_ token: String) -> Int {
+        lock.lock(); defer { lock.unlock() }; return blobCounts["Bearer " + token, default: 0]
+    }
+    static func markdown(isTrip: Bool) -> String {
+        "---\ntitle: \"記事\"\ndescription: \"説明\"\ndate: 2026-10-05\ntags: []\n---\n\n" + (isTrip ? "旅の本文" : "日記の本文")
+    }
+    static var diarySHA: String { PublicJPEG.blobSHA(Data(markdown(isTrip: false).utf8)) }
+    static var journeySHA: String { PublicJPEG.blobSHA(Data(markdown(isTrip: true).utf8)) }
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
         let url = request.url!, path = request.url!.path
         var status = 200, payload: [String: Any] = [:]
-        let diarySHA = String(repeating: "a", count: 40), journeySHA = String(repeating: "b", count: 40)
+        let diarySHA = Self.diarySHA, journeySHA = Self.journeySHA
         if path.contains("/git/trees/") {
             payload = ["truncated": false, "tree": [
                 ["path": "src/content/diary/old.md", "type": "blob", "sha": diarySHA],
@@ -518,7 +576,10 @@ private final class CategoryFixtureProtocol: URLProtocol {
                 ["path": "src/content/template/_index.md", "type": "blob", "sha": String(repeating: "d", count: 40)]]]
         } else if path.contains("/git/blobs/") {
             let isTrip = path.hasSuffix(journeySHA)
-            let markdown = "---\ntitle: \"記事\"\ndescription: \"説明\"\ndate: 2026-10-05\ntags: []\n---\n\n" + (isTrip ? "旅の本文" : "日記の本文")
+            Self.lock.lock()
+            Self.blobCounts[request.value(forHTTPHeaderField: "Authorization") ?? "", default: 0] += 1
+            Self.lock.unlock()
+            let markdown = Self.markdown(isTrip: isTrip)
             payload = ["sha": isTrip ? journeySHA : diarySHA, "encoding": "base64", "content": Data(markdown.utf8).base64EncodedString()]
         } else if path.contains("/contents/") {
             XCTAssertTrue(path.contains("/contents/src/content/journey/ios-"))
