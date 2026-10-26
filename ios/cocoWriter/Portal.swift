@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 @MainActor struct DraftListView: View {
     @EnvironmentObject private var drafts: DraftStore
@@ -11,7 +12,7 @@ import SwiftUI
     var body: some View {
         TabView(selection: $tab) {
             ArticleLibraryView().tabItem { Label("記事", systemImage: "doc.text") }.tag(0)
-            MusicLibraryView().tabItem { Label("アルバム", systemImage: "photo.on.rectangle.angled") }.tag(3)
+            ArticleAlbumView().tabItem { Label("アルバム", systemImage: "photo.on.rectangle.angled") }.tag(3)
             PrivateNotesView().tabItem { Label("自分のメモ", systemImage: "note.text") }.tag(1)
             SettingsView().tabItem { Label("設定", systemImage: "gearshape") }.tag(2)
         }
@@ -429,6 +430,8 @@ private struct CompactArticleRow: View {
 @MainActor struct PrivateNotesView: View {
     @EnvironmentObject private var store: PrivateNoteStore
     @AppStorage("private-note-composer") private var draftText = ""
+    @AppStorage("private-note-composer-task") private var draftIsTask = false
+    @AppStorage("private-note-composer-deadline") private var draftDeadline = 0.0
     @State private var selected: PrivateNote?
     @State private var selectedDay = Calendar.current.startOfDay(for: Date())
     @State private var browsingAll = false
@@ -440,15 +443,21 @@ private struct CompactArticleRow: View {
     @State private var trash = false
     @State private var managing = false
     @State private var managingTags = false
+    @State private var tasksOpen = false
+    @State private var tasksOnly = false
     @State private var selection = Set<UUID>()
     @State private var savedCount = 0
-    @State private var scrollTarget: UUID?
-    private var items: [PrivateNote] {
-        PrivateNoteTimeline.entries(store.notes, day: browsingAll ? nil : selectedDay, kind: filter, tag: selectedTag, query: query)
+    @State private var scrollTarget: String?
+    private var items: [NoteTimelineEvent] {
+        PrivateNoteTimeline.events(store.notes, day: browsingAll ? nil : selectedDay, kind: filter, tag: selectedTag, query: query, tasksOnly: tasksOnly)
+    }
+    private var draftDueDate: Binding<Date?> {
+        Binding(get: { draftDeadline == 0 ? nil : Date(timeIntervalSince1970: draftDeadline) },
+                set: { draftDeadline = $0?.timeIntervalSince1970 ?? 0 })
     }
     private var tags: [String] { store.tags }
     private var title: String {
-        if browsingAll { return selectedTag.map { "#" + $0 } ?? "すべてのメモ" }
+        if browsingAll { return (selectedTag.map { "#" + $0 } ?? (tasksOnly ? "TODOの記録" : "すべてのメモ")) + (tasksOnly && selectedTag != nil ? " · TODO" : "") }
         return selectedDay.formatted(.dateTime.month().day().weekday(.abbreviated).locale(Locale(identifier: "ja_JP")))
     }
 
@@ -466,12 +475,12 @@ private struct CompactArticleRow: View {
                             if let error = store.tagStorageError { Text(error).font(.caption).foregroundStyle(.red) }
                             if items.isEmpty {
                                 VStack(spacing: 6) {
-                                    Text(searching || selectedTag != nil ? "メモが見つかりません" : "この日のメモはまだありません")
+                                    Text(tasksOnly ? "TODOの記録はまだありません" : (searching || selectedTag != nil ? "メモが見つかりません" : "この日のメモはまだありません"))
                                     if !browsingAll { Text("下の入力欄から、今日のメモを書けます。").font(.caption) }
                                 }.font(.subheadline).foregroundStyle(WriterPalette.secondary).frame(maxWidth: .infinity)
                                     .padding(.vertical, 28).listRowSeparator(.hidden).listRowBackground(Color.clear)
                             }
-                            ForEach(items) { note in timelineRow(note).id(note.id) }
+                            ForEach(items) { event in timelineRow(event).id(event.id) }
                         }.listRowBackground(Color.clear)
                     }.writerCanvas().listStyle(.plain).scrollContentBackground(.hidden).scrollDismissesKeyboard(.interactively)
                         .contentMargins(.top, 8, for: .scrollContent).environment(\.defaultMinListRowHeight, 0)
@@ -500,8 +509,10 @@ private struct CompactArticleRow: View {
                             Button("完了") { managing = false; selection.removeAll() }
                         } else {
                             Menu {
-                                Button("日付で見る", systemImage: "calendar") { browsingAll = false; selectedTag = nil; query = ""; searching = false }
-                                Button("タグ・すべてのメモ", systemImage: "number") { browsingAll = true }
+                                Button("日付で見る", systemImage: "calendar") { browsingAll = false; selectedTag = nil; query = ""; searching = false; tasksOnly = false }
+                                Button("タグ・すべてのメモ", systemImage: "number") {
+                                    browsingAll = true; tasksOnly = false; selectedTag = nil; query = ""; searching = false; filter = nil
+                                }
                                 Button("タグを管理", systemImage: "slider.horizontal.3") { managingTags = true }
                                 Button("検索", systemImage: "magnifyingglass") { searching.toggle(); browsingAll = true; if !searching { query = "" } }
                                     .accessibilityIdentifier("note-search-toggle")
@@ -515,8 +526,14 @@ private struct CompactArticleRow: View {
                         }
                     }
                     ToolbarItemGroup(placement: .topBarTrailing) {
+                        Button { tasksOpen = true } label: {
+                            HStack(spacing: 3) {
+                                Image(systemName: "checklist")
+                                Text("\(PrivateNoteTimeline.pendingTasks(store.notes).count)").font(.caption).monospacedDigit()
+                            }
+                        }.accessibilityLabel("未完了のTODO一覧").accessibilityIdentifier("note-open-tasks")
                         if browsingAll || !Calendar.current.isDateInToday(selectedDay) {
-                            Button("今日") { selectedDay = Calendar.current.startOfDay(for: Date()); browsingAll = false; selectedTag = nil; query = ""; searching = false }
+                            Button("今日") { selectedDay = Calendar.current.startOfDay(for: Date()); browsingAll = false; selectedTag = nil; query = ""; searching = false; tasksOnly = false }
                                 .font(.subheadline).accessibilityIdentifier("note-today")
                         }
                         Button { calendarOpen = true } label: { Image(systemName: "calendar") }
@@ -526,20 +543,20 @@ private struct CompactArticleRow: View {
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     if managing {
                         HStack {
-                            Menu("\(selection.count)件選択") { Button("表示中を全て選択") { selection = Set(items.map(\.id)) } }
+                            Menu("\(selection.count)件選択") { Button("表示中を全て選択") { selection = Set(items.map { $0.note.id }) } }
                             Spacer()
                             Button("ゴミ箱へ移動", role: .destructive) { if store.moveToTrash(selection) { selection.removeAll() } }.disabled(selection.isEmpty)
                         }.font(.subheadline).padding(.horizontal, 16).padding(.vertical, 12).writerBarBackground()
                     } else {
-                        QuickNoteComposer(text: $draftText, tags: tags, enabled: store.loaded,
+                        QuickNoteComposer(text: $draftText, isTask: $draftIsTask, dueDate: draftDueDate, tags: tags, enabled: store.loaded,
                                           selectedTag: selectedTag, manageTags: { managingTags = true }, hideTag: { store.hideTag($0) }) {
                             let body = selectedTag.map { NoteTags.appending($0, to: draftText) } ?? draftText
                             let now = Date()
-                            guard store.addEntry(body: body, date: now) else { return false }
-                            scrollTarget = store.notes.first?.id
+                            guard store.addEntry(body: body, date: now, task: draftIsTask ? NoteTask(dueDate: draftDueDate.wrappedValue) : nil) else { return false }
+                            scrollTarget = store.notes.first?.id.uuidString
                             selectedDay = Calendar.current.startOfDay(for: now)
-                            browsingAll = false; selectedTag = nil; query = ""; searching = false; filter = nil
-                            draftText = ""; savedCount += 1
+                            browsingAll = false; selectedTag = nil; query = ""; searching = false; filter = nil; tasksOnly = false
+                            draftText = ""; draftIsTask = false; draftDeadline = 0; savedCount += 1
                             return true
                         }
                     }
@@ -549,6 +566,7 @@ private struct CompactArticleRow: View {
                 .onChange(of: selectedTag) { _, _ in selection.removeAll() }
                 .onChange(of: query) { _, _ in selection.removeAll() }
                 .onChange(of: selectedDay) { _, _ in selection.removeAll() }
+                .onChange(of: tasksOnly) { _, _ in selection.removeAll() }
                 .onChange(of: tags) { _, values in
                     if let selectedTag, !values.contains(where: { NoteTags.key($0) == NoteTags.key(selectedTag) }) { self.selectedTag = nil }
                 }
@@ -558,12 +576,15 @@ private struct CompactArticleRow: View {
                 }
                 .sheet(isPresented: $trash) { PrivateNoteTrashView().environmentObject(store) }
                 .sheet(isPresented: $managingTags) { NoteTagManagementView().environmentObject(store) }
+                .sheet(isPresented: $tasksOpen) {
+                    PendingNoteTasksView(showHistory: { showTaskHistory() }).environmentObject(store)
+                }
                 .sheet(isPresented: $calendarOpen) {
                     NavigationStack {
                         DatePicker("日付", selection: $selectedDay, displayedComponents: .date)
                             .datePickerStyle(.graphical).environment(\.locale, Locale(identifier: "ja_JP")).padding(.horizontal, 12)
                             .writerChrome().navigationTitle("日付を選ぶ").navigationBarTitleDisplayMode(.inline)
-                            .toolbar { Button("完了") { browsingAll = false; selectedTag = nil; query = ""; searching = false; calendarOpen = false } }
+                            .toolbar { Button("完了") { browsingAll = false; selectedTag = nil; query = ""; searching = false; tasksOnly = false; calendarOpen = false } }
                     }.presentationDetents([.height(420)]).presentationDragIndicator(.visible)
                 }
         }
@@ -583,6 +604,11 @@ private struct CompactArticleRow: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 16) {
                         tagFilter("すべて", tag: nil).accessibilityIdentifier("note-filter-all")
+                        Button { tasksOnly.toggle() } label: {
+                            Label("TODO", systemImage: "checklist").font(.subheadline.weight(tasksOnly ? .semibold : .regular))
+                                .foregroundStyle(tasksOnly ? WriterPalette.text : WriterPalette.secondary).padding(.vertical, 4)
+                                .overlay(alignment: .bottom) { if tasksOnly { Rectangle().fill(WriterPalette.text.opacity(0.65)).frame(height: 1) } }
+                        }.buttonStyle(.plain).accessibilityValue(tasksOnly ? "選択中" : "").accessibilityIdentifier("note-filter-tasks")
                         ForEach(tags, id: \.self) { tag in tagFilter("#" + tag, tag: tag).accessibilityIdentifier("note-filter-tag-" + tag) }
                         if let selectedTag, !tags.contains(where: { NoteTags.key($0) == NoteTags.key(selectedTag) }) { tagFilter("#" + selectedTag, tag: selectedTag) }
                     }.padding(.horizontal, 16)
@@ -596,7 +622,10 @@ private struct CompactArticleRow: View {
                         .accessibilityLabel("前の週")
                     ForEach(PrivateNoteTimeline.week(containing: selectedDay), id: \.self) { day in
                         let active = Calendar.current.isDate(day, inSameDayAs: selectedDay)
-                        let hasNotes = store.active.contains { Calendar.current.isDate($0.date, inSameDayAs: day) }
+                        let hasNotes = store.active.contains {
+                            Calendar.current.isDate($0.date, inSameDayAs: day)
+                                || $0.task?.completedAt.map { Calendar.current.isDate($0, inSameDayAs: day) } == true
+                        }
                         Button { selectedDay = day } label: {
                             VStack(spacing: 4) {
                                 Text(day, format: .dateTime.weekday(.narrow)).font(.system(size: 10)).foregroundStyle(WriterPalette.secondary)
@@ -619,21 +648,22 @@ private struct CompactArticleRow: View {
     }
 
     private func tagFilter(_ label: String, tag: String?) -> some View {
-        let active = tag.map { NoteTags.key($0) == selectedTag.map(NoteTags.key) } ?? (selectedTag == nil)
-        return Button { selectedTag = tag } label: {
+        let active = tag.map { NoteTags.key($0) == selectedTag.map(NoteTags.key) } ?? (selectedTag == nil && !tasksOnly)
+        return Button { selectedTag = tag; if tag == nil { tasksOnly = false } } label: {
             Text(label).font(.subheadline.weight(active ? .semibold : .regular))
                 .foregroundStyle(active ? WriterPalette.text : WriterPalette.secondary).padding(.vertical, 4)
                 .overlay(alignment: .bottom) { if active { Rectangle().fill(WriterPalette.text.opacity(0.65)).frame(height: 1) } }
         }.buttonStyle(.plain).accessibilityValue(active ? "選択中" : "")
     }
 
-    private func timelineRow(_ note: PrivateNote) -> some View {
-        HStack(alignment: .top, spacing: 8) {
+    private func timelineRow(_ event: NoteTimelineEvent) -> some View {
+        let note = event.note
+        return HStack(alignment: .top, spacing: 8) {
             if managing {
                 Image(systemName: selection.contains(note.id) ? "checkmark.circle.fill" : "circle").foregroundStyle(Color.accentColor).frame(width: 24).padding(.top, 8)
             } else if !browsingAll {
                 VStack(spacing: 4) {
-                    Text(note.date, format: .dateTime.hour().minute()).font(.system(size: 10)).monospacedDigit()
+                    Text(event.date, format: .dateTime.hour().minute()).font(.system(size: 10)).monospacedDigit()
                     if note.pinnedAt != nil { Image(systemName: "pin.fill").font(.system(size: 8)) }
                 }.foregroundStyle(WriterPalette.secondary).frame(width: 36, alignment: .trailing).padding(.top, 10)
             }
@@ -641,9 +671,9 @@ private struct CompactArticleRow: View {
                 if managing {
                     Button {
                         if selection.contains(note.id) { selection.remove(note.id) } else { selection.insert(note.id) }
-                    } label: { noteBlock(note) }.buttonStyle(.plain)
+                    } label: { noteBlock(note, isCompletion: event.isCompletion) }.buttonStyle(.plain)
                 } else {
-                    noteBlock(note)
+                    noteBlock(note, isCompletion: event.isCompletion)
                         .accessibilityAction(named: "編集") { selected = note }
                 }
             }.accessibilityIdentifier("note-row-" + note.id.uuidString)
@@ -664,9 +694,22 @@ private struct CompactArticleRow: View {
             }
     }
 
-    private func noteBlock(_ note: PrivateNote) -> some View {
+    private func noteBlock(_ note: PrivateNote, isCompletion: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             VStack(alignment: .leading, spacing: 4) {
+                if let task = note.task {
+                    HStack(spacing: 8) {
+                        if !managing {
+                            NoteTaskCheckButton(note: note) { store.toggleTask(note.id) }
+                        }
+                        Text(isCompletion ? "TODOを完了" : "TODO").font(.caption.weight(.medium)).foregroundStyle(WriterPalette.secondary)
+                        Spacer(minLength: 4)
+                        Button { selected = note } label: { Image(systemName: "ellipsis").frame(width: 28, height: 28) }
+                            .buttonStyle(.borderless).foregroundStyle(WriterPalette.secondary).accessibilityLabel("TODOを編集")
+                            .disabled(managing)
+                    }
+                    NoteTaskStatus(task: task)
+                }
                 if !note.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Text(note.title).font(.subheadline).lineLimit(1)
                 }
@@ -693,6 +736,10 @@ private struct CompactArticleRow: View {
 
     private func moveDay(_ amount: Int) {
         if let day = Calendar.current.date(byAdding: .day, value: amount, to: selectedDay) { selectedDay = day }
+    }
+
+    private func showTaskHistory() {
+        browsingAll = true; tasksOnly = true; selectedTag = nil; query = ""; searching = false; filter = nil
     }
 
     private func dayIdentifier(_ day: Date) -> String {
@@ -728,8 +775,201 @@ private struct NoteTagSuggestions: View {
     }
 }
 
+private struct NoteTaskCheckButton: View {
+    var note: PrivateNote
+    var toggle: () -> Void
+    var body: some View {
+        Button(action: toggle) {
+            Image(systemName: note.task?.isCompleted == true ? "checkmark.circle.fill" : "circle")
+                .font(.system(size: 23)).frame(width: 44, height: 44)
+                .foregroundStyle(note.task?.isCompleted == true ? WriterPalette.accent : WriterPalette.secondary)
+                .contentShape(Rectangle())
+        }.buttonStyle(.borderless)
+            .accessibilityLabel(note.displayTitle + (note.task?.isCompleted == true ? "を未完了に戻す" : "を完了にする"))
+            .accessibilityValue(note.task?.isCompleted == true ? "完了" : "未完了")
+            .accessibilityIdentifier("note-task-toggle-" + note.id.uuidString)
+    }
+}
+
+private struct NoteTaskStatus: View {
+    var task: NoteTask
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            if let due = task.dueDate {
+                Label {
+                    Text("期限 ") + Text(due, format: .dateTime.year().month().day().weekday(.abbreviated).locale(Locale(identifier: "ja_JP")))
+                        + Text(task.isOverdue() ? " · 期限超過" : (Calendar.current.isDateInToday(due) && !task.isCompleted ? " · 今日" : ""))
+                } icon: { Image(systemName: "calendar") }
+                .foregroundStyle(task.isOverdue() ? Color.orange : WriterPalette.secondary)
+            } else {
+                Label("期限なし", systemImage: "calendar").foregroundStyle(WriterPalette.secondary)
+            }
+            if let completed = task.completedAt {
+                Label {
+                    Text(completed, format: .dateTime.year().month().day().hour().minute().locale(Locale(identifier: "ja_JP"))) + Text(" 完了")
+                } icon: { Image(systemName: "checkmark") }
+                .foregroundStyle(WriterPalette.secondary)
+            }
+        }.font(.caption)
+    }
+}
+
+private struct NoteTaskDeadlinePicker: View {
+    @Binding var date: Date?
+    @State private var calendarOpen = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            quickDate("今日", offset: 0)
+            quickDate("明日", offset: 1)
+            Button { calendarOpen = true } label: {
+                Label {
+                    if let date {
+                        Text(date, format: .dateTime.month().day().weekday(.abbreviated).locale(Locale(identifier: "ja_JP")))
+                    } else { Text("期限なし") }
+                } icon: { Image(systemName: "calendar") }
+                .padding(.horizontal, 10).frame(minHeight: 36).background(WriterPalette.selected, in: Capsule())
+            }.buttonStyle(.borderless).accessibilityLabel("締め切りを選ぶ").accessibilityIdentifier("note-task-deadline")
+        }.font(.caption).foregroundStyle(WriterPalette.text)
+            .sheet(isPresented: $calendarOpen) {
+                NavigationStack {
+                    VStack(spacing: 8) {
+                        HStack {
+                            quickDate("今日", offset: 0)
+                            quickDate("明日", offset: 1)
+                            quickDate("1週間後", offset: 7)
+                            Spacer(minLength: 0)
+                        }.padding(.horizontal, 16)
+                        NoteTaskCalendar(visibleDate: date ?? Date()) { chosen in
+                            date = Calendar.current.startOfDay(for: chosen)
+                            calendarOpen = false
+                        }.frame(height: 360).padding(.horizontal, 12)
+                        Spacer(minLength: 0)
+                    }.padding(.top, 8).writerChrome().navigationTitle("締め切り").navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) { Button("閉じる") { calendarOpen = false } }
+                            ToolbarItem(placement: .confirmationAction) { Button("期限なし") { date = nil; calendarOpen = false } }
+                        }
+                }.presentationDetents([.height(510), .large]).presentationDragIndicator(.visible)
+            }
+    }
+
+    private func quickDate(_ title: String, offset: Int) -> some View {
+        let day = Calendar.current.date(byAdding: .day, value: offset, to: Calendar.current.startOfDay(for: Date())) ?? Date()
+        let active = date.map { Calendar.current.isDate($0, inSameDayAs: day) } ?? false
+        return Button { date = day; calendarOpen = false } label: {
+            Text(title).padding(.horizontal, 12).frame(minHeight: 36)
+                .background(active ? WriterPalette.selected : Color.clear, in: Capsule())
+                .overlay { Capsule().strokeBorder(WriterPalette.separator.opacity(0.4), lineWidth: 1) }
+        }.buttonStyle(.borderless).accessibilityValue(active ? "選択中" : "").accessibilityIdentifier("note-task-due-" + String(offset))
+    }
+}
+
+// Start with no selection so even today's date or the existing deadline can be
+// chosen with one tap. DatePicker's change-only binding misses those selections.
+private struct NoteTaskCalendar: UIViewRepresentable {
+    var visibleDate: Date
+    var choose: (Date) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(choose: choose) }
+
+    func makeUIView(context: Context) -> UICalendarView {
+        let view = UICalendarView()
+        view.calendar = Calendar.current
+        view.locale = Locale(identifier: "ja_JP")
+        view.timeZone = Calendar.current.timeZone
+        view.tintColor = UIColor(WriterPalette.accent)
+        view.visibleDateComponents = Calendar.current.dateComponents([.era, .year, .month, .day], from: visibleDate)
+        view.selectionBehavior = UICalendarSelectionSingleDate(delegate: context.coordinator)
+        return view
+    }
+
+    func updateUIView(_ view: UICalendarView, context: Context) { context.coordinator.choose = choose }
+
+    final class Coordinator: NSObject, UICalendarSelectionSingleDateDelegate {
+        var choose: (Date) -> Void
+        init(choose: @escaping (Date) -> Void) { self.choose = choose }
+        func dateSelection(_ selection: UICalendarSelectionSingleDate, didSelectDate dateComponents: DateComponents?) {
+            guard let dateComponents, let date = Calendar.current.date(from: dateComponents) else { return }
+            choose(date)
+        }
+    }
+}
+
+@MainActor private struct PendingNoteTasksView: View {
+    @EnvironmentObject private var store: PrivateNoteStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var selected: PrivateNote?
+    @State private var lastCompleted: UUID?
+    var showHistory: () -> Void
+    private var tasks: [PrivateNote] { PrivateNoteTimeline.pendingTasks(store.notes) }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if let error = store.storageError { Text(error).font(.caption).foregroundStyle(.red) }
+                if tasks.isEmpty {
+                    VStack(spacing: 10) {
+                        Image(systemName: "checkmark.circle").font(.largeTitle)
+                        Text("未完了のTODOはありません")
+                        Text("メモ入力欄のチェックボタンから追加できます。").font(.caption)
+                    }.foregroundStyle(WriterPalette.secondary).frame(maxWidth: .infinity).padding(.vertical, 36)
+                        .listRowBackground(Color.clear)
+                }
+                taskSection("期限超過", notes: tasks.filter { $0.task?.isOverdue() == true })
+                taskSection("今日", notes: tasks.filter { $0.task?.dueDate.map { Calendar.current.isDateInToday($0) } == true })
+                taskSection("これから", notes: tasks.filter { $0.task?.dueDate.map { Calendar.current.startOfDay(for: $0) > Calendar.current.startOfDay(for: Date()) } == true })
+                taskSection("期限なし", notes: tasks.filter { $0.task?.dueDate == nil })
+            }.writerCanvas().listStyle(.insetGrouped)
+                .writerChrome().navigationTitle("未完了のTODO").navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("閉じる") { dismiss() } } }
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    VStack(spacing: 12) {
+                        if let lastCompleted, store.notes.first(where: { $0.id == lastCompleted })?.task?.isCompleted == true {
+                            HStack {
+                                Text("完了しました。記録に残っています。").font(.caption)
+                                Spacer()
+                                Button("戻す") { if store.toggleTask(lastCompleted) { self.lastCompleted = nil } }.font(.subheadline)
+                            }
+                        }
+                        Button { showHistory(); dismiss() } label: { Label("完了分を含むTODOの記録を見る", systemImage: "clock.arrow.circlepath") }
+                            .font(.subheadline).accessibilityIdentifier("note-tasks-history")
+                    }.padding(16).frame(maxWidth: .infinity).writerBarBackground()
+                }
+                .sheet(item: $selected) { note in
+                    PrivateNoteEditor(note: note).environmentObject(store)
+                        .presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
+                }
+        }
+    }
+
+    @ViewBuilder private func taskSection(_ title: String, notes: [PrivateNote]) -> some View {
+        if !notes.isEmpty {
+            Section(title) {
+                ForEach(notes) { note in
+                    HStack(alignment: .top, spacing: 4) {
+                        NoteTaskCheckButton(note: note) { if store.toggleTask(note.id) { lastCompleted = note.id } }
+                        Button { selected = note } label: {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(verbatim: note.displayBody.isEmpty ? note.displayTitle : note.displayBody).font(.subheadline).lineLimit(4)
+                                    .foregroundStyle(WriterPalette.text)
+                                if let task = note.task { NoteTaskStatus(task: task) }
+                                if !note.tags.isEmpty {
+                                    Text(verbatim: note.tags.map { "#" + $0 }.joined(separator: "  ")).font(.caption).foregroundStyle(WriterPalette.secondary)
+                                }
+                            }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 9).contentShape(Rectangle())
+                        }.buttonStyle(.borderless).accessibilityLabel("TODOを編集: " + note.displayTitle)
+                    }.listRowBackground(WriterPalette.surface).accessibilityIdentifier("pending-note-task-" + note.id.uuidString)
+                }
+            }
+        }
+    }
+}
+
 private struct QuickNoteComposer: View {
     @Binding var text: String
+    @Binding var isTask: Bool
+    @Binding var dueDate: Date?
     var tags: [String]
     var enabled: Bool
     var selectedTag: String?
@@ -742,8 +982,20 @@ private struct QuickNoteComposer: View {
     var body: some View {
         VStack(spacing: 0) {
             Divider().opacity(0.35)
+            if isTask {
+                HStack(spacing: 8) {
+                    Text("締め切り").font(.caption).foregroundStyle(WriterPalette.secondary)
+                    NoteTaskDeadlinePicker(date: $dueDate)
+                    Spacer(minLength: 0)
+                }.padding(.horizontal, 12).padding(.top, 8)
+            }
             if tagChoices || writing { NoteTagSuggestions(text: $text, tags: tags, manage: manageTags, hide: hideTag).padding(.horizontal, 12).padding(.top, 7) }
             HStack(alignment: .bottom, spacing: 10) {
+                Button { isTask.toggle(); writing = true } label: {
+                    Image(systemName: isTask ? "checkmark.circle.fill" : "checkmark.circle").font(.body).frame(width: 32, height: 44)
+                }.buttonStyle(.plain).foregroundStyle(isTask ? WriterPalette.accent : WriterPalette.secondary)
+                    .accessibilityLabel(isTask ? "通常のメモに戻す" : "TODOにする").accessibilityValue(isTask ? "TODO" : "メモ")
+                    .accessibilityIdentifier("quick-note-task")
                 Button {
                     if #available(iOS 18.0, *) { markerRequest += 1 }
                     else { text = NoteTags.insertingMarker(in: text, at: NSRange(location: text.utf16.count, length: 0)).text }
@@ -752,12 +1004,12 @@ private struct QuickNoteComposer: View {
                     Image(systemName: "number").font(.body).frame(width: 28, height: 36)
                 }.buttonStyle(.plain).foregroundStyle(WriterPalette.secondary).accessibilityLabel("#を入力").accessibilityIdentifier("quick-note-hash")
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("今日のメモ" + (selectedTag.map { " #" + $0 } ?? ""))
+                    Text((isTask ? "今日のTODO" : "今日のメモ") + (selectedTag.map { " #" + $0 } ?? ""))
                         .font(.system(size: 10)).foregroundStyle(WriterPalette.secondary)
                     if #available(iOS 18.0, *) {
-                        NoteComposerField(text: $text, markerRequest: markerRequest, writing: $writing)
+                        NoteComposerField(text: $text, placeholder: isTask ? "やることを書く…" : "ひとこと書く…", markerRequest: markerRequest, writing: $writing)
                     } else {
-                        TextField("ひとこと書く…", text: $text, prompt: Text("ひとこと書く…").foregroundStyle(WriterPalette.placeholder), axis: .vertical)
+                        TextField(isTask ? "やることを書く…" : "ひとこと書く…", text: $text, prompt: Text(isTask ? "やることを書く…" : "ひとこと書く…").foregroundStyle(WriterPalette.placeholder), axis: .vertical)
                         .lineLimit(1...5).focused($writing).font(.subheadline).padding(.vertical, 8)
                         .accessibilityIdentifier("quick-note-body")
                     }
@@ -780,11 +1032,12 @@ private struct QuickNoteComposer: View {
 @available(iOS 18.0, *)
 private struct NoteComposerField: View {
     @Binding var text: String
+    var placeholder: String
     var markerRequest: Int
     var writing: FocusState<Bool>.Binding
     @State private var selection: TextSelection?
     var body: some View {
-        TextField("ひとこと書く…", text: $text, selection: $selection, prompt: Text("ひとこと書く…").foregroundStyle(WriterPalette.placeholder), axis: .vertical)
+        TextField(placeholder, text: $text, selection: $selection, prompt: Text(placeholder).foregroundStyle(WriterPalette.placeholder), axis: .vertical)
             .lineLimit(1...5).focused(writing).font(.subheadline).padding(.vertical, 8)
             .accessibilityIdentifier("quick-note-body")
             .onChange(of: markerRequest) { _, _ in
@@ -853,6 +1106,18 @@ private struct NoteComposerField: View {
                         .lineLimit(3...24).font(.subheadline).lineSpacing(2).accessibilityIdentifier("private-note-body")
                         .padding(.vertical, 8)
                     NoteTagSuggestions(text: $note.body, tags: store.tags, manage: { managingTags = true }, hide: { store.hideTag($0) })
+                    Toggle("TODOとして残す", isOn: Binding(get: { note.task != nil }, set: { enabled in
+                        note.task = enabled ? NoteTask() : nil
+                    })).font(.subheadline).accessibilityIdentifier("private-note-is-task")
+                    if let task = note.task {
+                        NoteTaskDeadlinePicker(date: Binding(get: { note.task?.dueDate }, set: { note.task?.dueDate = $0 }))
+                        HStack {
+                            NoteTaskCheckButton(note: note) { note.task?.completedAt = task.isCompleted ? nil : Date() }
+                            Text(task.isCompleted ? "完了 · タップで未完了に戻す" : "未完了 · タップで完了にする").font(.caption).foregroundStyle(WriterPalette.secondary)
+                        }
+                        if task.isCompleted { NoteTaskStatus(task: task) }
+                        Text("完了しても、このメモと締め切りは日記に残ります。").font(.caption).foregroundStyle(WriterPalette.secondary)
+                    }
                     DisclosureGroup("日付・タイトル") {
                         VStack(alignment: .leading, spacing: 14) {
                             TextField("タイトル（なくても大丈夫）", text: $note.title).accessibilityIdentifier("private-note-title")

@@ -16,6 +16,8 @@ struct PrivateNote: Codable, Equatable, Identifiable {
     var updatedAt = Date()
     var pinnedAt: Date?
     var deletedAt: Date?
+    // Optional so notes saved before TODO support decode without a migration.
+    var task: NoteTask?
     var displayTitle: String {
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         if !title.isEmpty { return title }
@@ -23,6 +25,24 @@ struct PrivateNote: Codable, Equatable, Identifiable {
     }
     var tags: [String] { NoteTags.extract(from: body) }
     var displayBody: String { NoteTags.removing(from: body) }
+}
+
+struct NoteTask: Codable, Equatable {
+    var dueDate: Date?
+    var completedAt: Date?
+    var isCompleted: Bool { completedAt != nil }
+
+    func isOverdue(now: Date = Date(), calendar: Calendar = .current) -> Bool {
+        guard !isCompleted, let dueDate else { return false }
+        return calendar.startOfDay(for: dueDate) < calendar.startOfDay(for: now)
+    }
+}
+
+struct NoteTimelineEvent: Identifiable {
+    let note: PrivateNote
+    let isCompletion: Bool
+    var id: String { note.id.uuidString + (isCompletion ? "-completed" : "") }
+    var date: Date { isCompletion ? (note.task?.completedAt ?? note.date) : note.date }
 }
 
 // Tags stay in the text, so existing saved notes need no schema migration.
@@ -123,6 +143,33 @@ struct NoteTagCatalog: Codable, Equatable {
 }
 
 enum PrivateNoteTimeline {
+    // Completion is another view of the same note, never a second saved copy.
+    // All-notes/tag browsing shows each note once; daily browsing also shows the
+    // completion on its own day when it differs from the original entry's day.
+    static func events(_ notes: [PrivateNote], day: Date? = nil, calendar: Calendar = .current,
+                       kind: NoteKind? = nil, tag: String? = nil, query: String = "", tasksOnly: Bool = false) -> [NoteTimelineEvent] {
+        items(notes, kind: kind, tag: tag, query: query).filter { !tasksOnly || $0.task != nil }.flatMap { note in
+            var events = [NoteTimelineEvent(note: note, isCompletion: false)]
+            if day != nil, let completedAt = note.task?.completedAt,
+               !calendar.isDate(note.date, inSameDayAs: completedAt) {
+                events.append(NoteTimelineEvent(note: note, isCompletion: true))
+            }
+            return events.filter { event in day.map { calendar.isDate(event.date, inSameDayAs: $0) } ?? true }
+        }.sorted {
+            if $0.date != $1.date { return day == nil ? $0.date > $1.date : $0.date < $1.date }
+            return $0.id < $1.id
+        }
+    }
+
+    static func pendingTasks(_ notes: [PrivateNote]) -> [PrivateNote] {
+        notes.filter { $0.deletedAt == nil && $0.task?.isCompleted == false }.sorted {
+            let left = $0.task?.dueDate ?? .distantFuture, right = $1.task?.dueDate ?? .distantFuture
+            if left != right { return left < right }
+            if $0.date != $1.date { return $0.date < $1.date }
+            return $0.id.uuidString < $1.id.uuidString
+        }
+    }
+
     // A day's timeline reads morning to night; browsing tags reads newest first.
     static func entries(_ notes: [PrivateNote], day: Date? = nil, calendar: Calendar = .current,
                         kind: NoteKind? = nil, tag: String? = nil, query: String = "") -> [PrivateNote] {
@@ -251,10 +298,10 @@ enum PrivateNoteTimeline {
             tagCatalog = next; tagStorageError = nil; return true
         } catch { tagStorageError = "タグの設定を保存できませんでした。\(error.localizedDescription)"; return false }
     }
-    @discardableResult func addEntry(body: String, date: Date = Date()) -> Bool {
+    @discardableResult func addEntry(body: String, date: Date = Date(), task: NoteTask? = nil) -> Bool {
         let body = body.trimmingCharacters(in: .whitespacesAndNewlines)
         guard loaded, !body.isEmpty else { return false }
-        var note = PrivateNote(); note.body = body; note.date = date
+        var note = PrivateNote(); note.body = body; note.date = date; note.task = task
         guard commit([note] + notes) else { return false }
         registerTags(note.tags)
         return true
@@ -294,6 +341,14 @@ enum PrivateNoteTimeline {
     @discardableResult func togglePin(_ id: UUID) -> Bool {
         guard loaded, let index = notes.firstIndex(where: { $0.id == id && $0.deletedAt == nil }) else { return false }
         var next = notes; next[index].pinnedAt = next[index].pinnedAt == nil ? Date() : nil; return commit(next)
+    }
+    @discardableResult func toggleTask(_ id: UUID, now: Date = Date()) -> Bool {
+        guard loaded, let index = notes.firstIndex(where: { $0.id == id && $0.deletedAt == nil }),
+              let task = notes[index].task else { return false }
+        var next = notes
+        next[index].task?.completedAt = task.isCompleted ? nil : now
+        next[index].updatedAt = now
+        return commit(next)
     }
     private func commit(_ next: [PrivateNote]) -> Bool {
         let previous = notes; notes = next

@@ -126,6 +126,85 @@ final class ArticleImageTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: try store.imageFiles.url(for: image).path))
         XCTAssertEqual(store.drafts.first?.body, image.markdown)
     }
+    func testAlbumOnlyIncludesImagesInsertedInActiveArticles() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let files = ArticleImageFiles(root: root)
+        var draft = Draft(kind: .diary); draft.title = "写真日記"
+        let image = try files.save(PublicJPEG.prepare(data: fixture(width: 100, height: 50, orientation: 1)), articleID: draft.id)
+        draft.images = [image]
+        XCTAssertTrue(ArticleAlbum.photos(in: [draft], configuration: .fixture).isEmpty)
+        draft.body = "![散歩道](\(image.publicPath))\n\n" + image.markdown
+        let photos = ArticleAlbum.photos(in: [draft], configuration: .fixture)
+        XCTAssertEqual(photos.count, 1)
+        let photo = try XCTUnwrap(photos.first), use = try XCTUnwrap(photo.uses.first)
+        XCTAssertEqual(photo.uses.count, 1); XCTAssertEqual(use.articleID, draft.id)
+        XCTAssertEqual(use.title, "写真日記"); XCTAssertEqual(use.caption, "散歩道"); XCTAssertEqual(use.image, image)
+        XCTAssertEqual(try files.read(try XCTUnwrap(use.image)), try files.read(image))
+        draft.body = "画像を本文から外した"
+        XCTAssertTrue(ArticleAlbum.photos(in: [draft], configuration: .fixture).isEmpty)
+        draft.body = image.markdown; draft.deletedAt = Date()
+        XCTAssertTrue(ArticleAlbum.photos(in: [draft], configuration: .fixture).isEmpty)
+        draft.deletedAt = nil
+        XCTAssertEqual(ArticleAlbum.photos(in: [draft], configuration: .fixture).count, 1)
+    }
+
+    func testAlbumGroupsSharedImageBytesAndFiltersArticleShelfAndSearch() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let files = ArticleImageFiles(root: root)
+        let prepared = try PublicJPEG.prepare(data: fixture(width: 100, height: 50, orientation: 1))
+        var old = Draft(kind: .diary); old.title = "昔の散歩"; old.date = Date(timeIntervalSince1970: 100); old.tags = "日常"
+        let original = try files.save(prepared, articleID: old.id)
+        old.images = [original]; old.body = original.markdown; old.remoteSHA = "published"
+        var recent = Draft(kind: .diary); recent.title = "新しい記事"; recent.date = Date(timeIntervalSince1970: 200)
+        let copy = try files.save(prepared, articleID: recent.id)
+        recent.images = [copy]; recent.body = "![公園の写真](\(copy.publicPath))"
+        XCTAssertNotEqual(original.repositoryPath, copy.repositoryPath)
+        let photo = try XCTUnwrap(ArticleAlbum.photos(in: [old, recent], configuration: .fixture).first)
+        XCTAssertEqual(photo.uses.map(\.articleID), [recent.id, old.id])
+        XCTAssertEqual(ArticleAlbum.photos(in: [old, recent], configuration: .fixture).count, 1)
+        XCTAssertEqual(ArticleAlbum.photos(in: [old, recent], configuration: .fixture, shelf: .published).first?.uses.map(\.articleID), [old.id])
+        XCTAssertEqual(ArticleAlbum.photos(in: [old, recent], configuration: .fixture, shelf: .drafts).first?.uses.map(\.articleID), [recent.id])
+        for query in ["昔の散歩", "公園", "日常"] {
+            XCTAssertEqual(ArticleAlbum.photos(in: [old, recent], configuration: .fixture, query: query).first?.uses.count, 2)
+        }
+        XCTAssertTrue(ArticleAlbum.photos(in: [old, recent], configuration: .fixture, shelf: .drafts, query: "日常").isEmpty)
+        XCTAssertTrue(ArticleAlbum.photos(in: [old, recent], configuration: .fixture, query: "海").isEmpty)
+        // Clearing a published copy changes availability, not membership in the album.
+        try FileManager.default.removeItem(at: files.url(for: original))
+        let publishedPhoto = try XCTUnwrap(ArticleAlbum.photos(in: [old], configuration: .fixture).first)
+        XCTAssertNotNil(publishedPhoto.uses.first?.remoteURL)
+    }
+
+    func testAlbumSupportsExistingSiteImagesAndMusicCommentsAndIgnoresCodeAndUnsafeURLs() throws {
+        var article = Draft(kind: .diary); article.title = "既存記事"
+        article.body = """
+        ![外部の写真](https://images.example.org/photo.jpg)
+        ![サイトの写真](/photos/walk.png)
+        `![コード](https://images.example.org/code.jpg)`
+        ```markdown
+        ![サンプル](https://images.example.org/sample.jpg)
+        ```
+        ![端末ファイル](file:///private/photo.jpg)
+        ![認証付き](https://user:password@images.example.org/private.jpg)
+        ![不正なパス](/photos/../private.jpg)
+        """
+        var music = MusicItem(); music.comment = "![曲の写真](https://images.example.org/music.jpg)"
+        article.music = [music]
+        let photos = ArticleAlbum.photos(in: [article], configuration: .fixture)
+        XCTAssertEqual(photos.count, 3)
+        XCTAssertEqual(photos.flatMap(\.uses).map(\.caption), ["外部の写真", "サイトの写真", "曲の写真"])
+        XCTAssertEqual(photos.flatMap(\.uses).compactMap(\.remoteURL).map(\.absoluteString), [
+            "https://images.example.org/photo.jpg", "https://example.github.io/photos/walk.png", "https://images.example.org/music.jpg"
+        ])
+        XCTAssertTrue(photos.flatMap(\.uses).allSatisfy { $0.image == nil })
+        let snapshot = article
+        article.pendingMarkdown = "![送信結果の確認待ち](https://images.example.org/pending.jpg)"
+        XCTAssertEqual(ArticleAlbum.photos(in: [article], configuration: .fixture).first?.uses.first?.caption, "送信結果の確認待ち")
+        XCTAssertEqual(snapshot.body, article.body)
+    }
+
     func testArticleBundleContainsMarkdownAndProcessedJPEGAtRepositoryPaths() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

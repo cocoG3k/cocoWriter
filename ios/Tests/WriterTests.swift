@@ -372,6 +372,98 @@ final class WriterTests: XCTestCase {
         try FileManager.default.removeItem(at: blocker)
         XCTAssertTrue(store.addEntry(body: "消したくない一言 #気づき")); XCTAssertEqual(store.notes.count, 1); XCTAssertNil(store.storageError)
     }
+    @MainActor func testLegacyNotesWithoutTaskFieldKeepDatesTextAndTags() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        var note = PrivateNote(); note.kind = .journal; note.body = "昔の日記 #TODO #日常"; note.pinnedAt = Date()
+        let data = try JSONEncoder().encode([note])
+        XCTAssertFalse(try XCTUnwrap(String(data: data, encoding: .utf8)).contains("\"task\""))
+        let url = folder.appendingPathComponent("notes.json"); try data.write(to: url)
+        let store = PrivateNoteStore(url: url)
+        XCTAssertTrue(store.loaded); XCTAssertEqual(store.notes, [note]); XCTAssertNil(store.notes.first?.task)
+        XCTAssertTrue(PrivateNoteTimeline.pendingTasks(store.notes).isEmpty)
+        XCTAssertFalse(store.toggleTask(note.id))
+        XCTAssertTrue(store.addEntry(body: "新しいTODO", task: NoteTask()))
+        XCTAssertEqual(PrivateNoteStore(url: url).notes.first { $0.id == note.id }, note)
+    }
+
+    @MainActor func testTaskCompletionAndReopeningPersistWithoutRemovingDiaryOrDeadline() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let url = folder.appendingPathComponent("notes.json"), store = PrivateNoteStore(url: url)
+        let created = Date(timeIntervalSince1970: 1_000), due = Date(timeIntervalSince1970: 200_000), completed = Date(timeIntervalSince1970: 100_000)
+        XCTAssertTrue(store.addEntry(body: "資料を提出 #仕事", date: created, task: NoteTask(dueDate: due)))
+        let original = try XCTUnwrap(store.notes.first)
+        XCTAssertTrue(store.toggleTask(original.id, now: completed))
+        let reopened = PrivateNoteStore(url: url), saved = try XCTUnwrap(reopened.notes.first)
+        XCTAssertEqual(reopened.notes.count, 1); XCTAssertEqual(saved.date, created); XCTAssertEqual(saved.body, original.body)
+        XCTAssertEqual(saved.tags, ["仕事"]); XCTAssertEqual(saved.task?.dueDate, due); XCTAssertEqual(saved.task?.completedAt, completed)
+        XCTAssertTrue(PrivateNoteTimeline.pendingTasks(reopened.notes).isEmpty)
+        XCTAssertEqual(PrivateNoteTimeline.events(reopened.notes, tag: "仕事", tasksOnly: true).map(\.note.id), [original.id])
+        XCTAssertTrue(reopened.toggleTask(original.id))
+        let pending = PrivateNoteStore(url: url)
+        XCTAssertNil(pending.notes.first?.task?.completedAt); XCTAssertEqual(pending.notes.first?.task?.dueDate, due)
+        XCTAssertEqual(PrivateNoteTimeline.pendingTasks(pending.notes).map(\.id), [original.id])
+        XCTAssertTrue(pending.moveToTrash([original.id])); XCTAssertFalse(pending.toggleTask(original.id))
+        XCTAssertTrue(PrivateNoteTimeline.pendingTasks(pending.notes).isEmpty)
+        XCTAssertTrue(pending.restore(original.id)); XCTAssertEqual(pending.notes.first?.task?.dueDate, due)
+    }
+
+    func testPendingTasksIncludeOverdueAndUndatedButExcludeCompletedDeletedAndMemos() throws {
+        var calendar = Calendar(identifier: .gregorian); calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "Asia/Tokyo"))
+        let today = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 10, day: 26)))
+        var overdue = PrivateNote(); overdue.task = NoteTask(dueDate: today.addingTimeInterval(-86_400))
+        var dueToday = PrivateNote(); dueToday.task = NoteTask(dueDate: today)
+        var future = PrivateNote(); future.task = NoteTask(dueDate: today.addingTimeInterval(86_400))
+        var undated = PrivateNote(); undated.task = NoteTask()
+        var done = overdue; done.id = UUID(); done.task?.completedAt = today
+        var deleted = overdue; deleted.id = UUID(); deleted.deletedAt = today
+        let notes = [undated, future, done, PrivateNote(), dueToday, deleted, overdue]
+        XCTAssertEqual(PrivateNoteTimeline.pendingTasks(notes).map(\.id), [overdue.id, dueToday.id, future.id, undated.id])
+        XCTAssertTrue(overdue.task!.isOverdue(now: today, calendar: calendar))
+        XCTAssertFalse(dueToday.task!.isOverdue(now: today.addingTimeInterval(86_399), calendar: calendar))
+        XCTAssertFalse(done.task!.isOverdue(now: today, calendar: calendar))
+        XCTAssertFalse(undated.task!.isOverdue(now: today, calendar: calendar))
+    }
+
+    func testCompletionAppearsOnItsLocalDayAndOriginalEntryRemainsWithoutDuplicateHistory() throws {
+        var calendar = Calendar(identifier: .gregorian); calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "Asia/Tokyo"))
+        let day = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 10, day: 26)))
+        var note = PrivateNote(); note.body = "提出 #仕事"; note.date = day.addingTimeInterval(86_399)
+        note.task = NoteTask(dueDate: day.addingTimeInterval(3 * 86_400), completedAt: day.addingTimeInterval(86_400))
+        let original = PrivateNoteTimeline.events([note], day: day, calendar: calendar)
+        let nextDay = day.addingTimeInterval(86_400)
+        let completion = PrivateNoteTimeline.events([note], day: nextDay, calendar: calendar, tag: "仕事", query: "提出", tasksOnly: true)
+        XCTAssertEqual(original.count, 1); XCTAssertFalse(try XCTUnwrap(original.first).isCompletion)
+        XCTAssertEqual(completion.count, 1); XCTAssertTrue(try XCTUnwrap(completion.first).isCompletion)
+        XCTAssertEqual(completion.first?.note.id, note.id); XCTAssertEqual(completion.first?.date, note.task?.completedAt)
+        XCTAssertNotEqual(completion.first?.id, original.first?.id)
+        XCTAssertEqual(PrivateNoteTimeline.events([note], tasksOnly: true).count, 1)
+        XCTAssertTrue(PrivateNoteTimeline.events([note], day: nextDay, calendar: calendar, tag: "別タグ").isEmpty)
+        note.task?.completedAt = note.date
+        XCTAssertEqual(PrivateNoteTimeline.events([note], day: day, calendar: calendar).count, 1)
+        note.deletedAt = day
+        XCTAssertTrue(PrivateNoteTimeline.events([note], day: day, calendar: calendar).isEmpty)
+    }
+
+    @MainActor func testFailedTaskToggleRollsBackAndCanRetry() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let notesFolder = folder.appendingPathComponent("storage")
+        let url = notesFolder.appendingPathComponent("notes.json"), store = PrivateNoteStore(url: url)
+        XCTAssertTrue(store.addEntry(body: "保存を守るTODO", task: NoteTask()))
+        let original = try XCTUnwrap(store.notes.first)
+        let backup = folder.appendingPathComponent("backup")
+        try FileManager.default.moveItem(at: notesFolder, to: backup)
+        try Data("blocker".utf8).write(to: notesFolder)
+        XCTAssertFalse(store.toggleTask(original.id)); XCTAssertEqual(store.notes, [original]); XCTAssertNotNil(store.storageError)
+        try FileManager.default.removeItem(at: notesFolder)
+        try FileManager.default.moveItem(at: backup, to: notesFolder)
+        XCTAssertTrue(store.toggleTask(original.id)); XCTAssertNil(store.storageError)
+        XCTAssertEqual(PrivateNoteStore(url: url).notes.first?.task?.isCompleted, true)
+    }
+
     func testSBOMAndLicensesAreBundled() throws {
         let inventory = try XCTUnwrap(DependencyInventory.bundled)
         XCTAssertEqual(inventory.specVersion, "1.6")

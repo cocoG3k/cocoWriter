@@ -1,6 +1,7 @@
 import SwiftUI
 
 @MainActor struct MusicLibraryView: View {
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var library: MusicLibraryStore
     @EnvironmentObject private var drafts: DraftStore
     @State private var editing: MusicItem?
@@ -8,6 +9,7 @@ import SwiftUI
     @State private var picking = false
     @State private var pendingArticle: Draft?
     @State private var search = ""
+    var showsCloseButton = false
     var body: some View {
         NavigationStack {
             List {
@@ -24,9 +26,15 @@ import SwiftUI
                             .accessibilityIdentifier("music-library-row-" + item.id.uuidString)
                     }
                 }
-            }.writerCanvas().writerChrome().navigationTitle("アルバム").navigationBarTitleDisplayMode(.inline)
+            }.writerCanvas().writerChrome().navigationTitle("曲ストック").navigationBarTitleDisplayMode(.inline)
                 .searchable(text: $search, prompt: "曲名・アーティスト・紹介文")
-                .toolbar { Button { let item = MusicItem(); if library.update(item) { editing = item } } label: { Image(systemName: "plus") }.disabled(!library.loaded).accessibilityLabel("曲をストックに追加").accessibilityIdentifier("music-library-add") }
+                .toolbar {
+                    if showsCloseButton { ToolbarItem(placement: .cancellationAction) { Button("閉じる") { dismiss() } } }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { let item = MusicItem(); if library.update(item) { editing = item } } label: { Image(systemName: "plus") }
+                            .disabled(!library.loaded).accessibilityLabel("曲をストックに追加").accessibilityIdentifier("music-library-add")
+                    }
+                }
                 .sheet(item: $editing) { item in MusicLibraryEditor(item: item) }
                 .sheet(item: $article) { draft in NavigationStack { EditorView(draft: draft) } }
                 .sheet(isPresented: $picking, onDismiss: { article = pendingArticle; pendingArticle = nil }) {
@@ -73,7 +81,7 @@ import SwiftUI
         NavigationStack {
             List {
                 if let error = library.storageError { Text(error).foregroundStyle(.red) }
-                if library.items.isEmpty { Text("「アルバム」で先に曲を保存してください。") }
+                if library.items.isEmpty { Text("「アルバム」右上の曲ストックから、先に曲を保存してください。") }
                 ForEach(library.items.filter { musicMatches($0, search: search) }) { item in
                     Button {
                         if selected.contains(item.id) { selected.remove(item.id) } else { selected.insert(item.id) }

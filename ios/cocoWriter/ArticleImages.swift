@@ -342,15 +342,22 @@ struct ArticleBundle: FileDocument {
 }
 
 enum ArticleImageReferences {
+    struct Reference: Equatable {
+        var source: String
+        var caption: String
+    }
     private struct Collector: MarkupVisitor {
-        typealias Result = [String]
-        mutating func defaultVisit(_ markup: Markup) -> [String] { markup.children.flatMap { visit($0) } }
-        mutating func visitImage(_ image: Markdown.Image) -> [String] { image.source.map { [$0] } ?? [] }
+        typealias Result = [Reference]
+        mutating func defaultVisit(_ markup: Markup) -> [Reference] { markup.children.flatMap { visit($0) } }
+        mutating func visitImage(_ image: Markdown.Image) -> [Reference] {
+            image.source.map { [Reference(source: $0, caption: image.plainText)] } ?? []
+        }
     }
-    static func paths(in markdown: String) -> Set<String> {
+    static func references(in markdown: String) -> [Reference] {
         var collector = Collector()
-        return Set(collector.visit(Document(parsing: markdown)))
+        return collector.visit(Document(parsing: markdown))
     }
+    static func paths(in markdown: String) -> Set<String> { Set(references(in: markdown).map(\.source)) }
     static func imported(from markdown: String, profile: BlogProfile = .current, configuration: SiteConfiguration = .current) -> [ArticleImage] {
         paths(in: markdown).sorted().compactMap { path in
             guard let repositoryPath = profile.repositoryImageReference(path, configuration: configuration) else { return nil }
@@ -362,5 +369,213 @@ enum ArticleImageReferences {
         let escaped = NSRegularExpression.escapedPattern(for: path)
         guard let regex = try? NSRegularExpression(pattern: "!\\[[^\\]]*\\]\\(\(escaped)\\)") else { return text }
         return regex.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text), withTemplate: "")
+    }
+}
+
+struct ArticleAlbumUse: Identifiable {
+    var id: UUID { articleID }
+    let articleID: UUID
+    let title: String
+    let date: Date
+    let isPublished: Bool
+    let tags: String
+    let caption: String
+    let image: ArticleImage?
+    let remoteURL: URL?
+}
+
+struct ArticleAlbumPhoto: Identifiable {
+    let id: String
+    var uses: [ArticleAlbumUse]
+}
+
+enum ArticleAlbum {
+    // Derive the album from actual Markdown references. Merely attaching a file,
+    // removing it from the article, or moving the article to Trash must not leave
+    // an unrelated photo in this view. There is no separate album database.
+    static func photos(in drafts: [Draft], configuration: SiteConfiguration = .current,
+                       shelf: ArticleShelf? = nil, query: String = "") -> [ArticleAlbumPhoto] {
+        var result: [ArticleAlbumPhoto] = []
+        var indexes: [String: Int] = [:]
+        let articles = drafts.filter { $0.deletedAt == nil && (shelf == nil || $0.isPublished == (shelf == .published)) }.sorted {
+            if $0.date != $1.date { return $0.date > $1.date }
+            return $0.id.uuidString < $1.id.uuidString
+        }
+        for draft in articles {
+            for reference in ArticleImageReferences.references(in: draft.pendingMarkdown ?? draft.markdown) {
+                let image = draft.attachedImages.first { $0.publicPath == reference.source }
+                let remoteURL = configuration.previewAssetURL(for: reference.source, profile: draft.profile)
+                // A processed photo can occur at different paths in several articles.
+                guard let key = image.map({ "local:" + $0.hash }) ?? remoteURL.map({ "remote:" + $0.absoluteString }) else { continue }
+                let use = ArticleAlbumUse(articleID: draft.id, title: draft.displayTitle, date: draft.date,
+                    isPublished: draft.isPublished, tags: draft.tags, caption: reference.caption, image: image, remoteURL: remoteURL)
+                if let index = indexes[key] {
+                    if !result[index].uses.contains(where: { $0.articleID == draft.id }) { result[index].uses.append(use) }
+                } else {
+                    indexes[key] = result.count
+                    result.append(ArticleAlbumPhoto(id: key, uses: [use]))
+                }
+            }
+        }
+        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return result.filter { photo in
+            query.isEmpty || photo.uses.contains { ($0.title + "\n" + $0.caption + "\n" + $0.tags).localizedStandardContains(query) }
+        }
+    }
+}
+
+@MainActor struct ArticleAlbumView: View {
+    @EnvironmentObject private var store: DraftStore
+    @State private var shelf: ArticleShelf?
+    @State private var query = ""
+    @State private var selected: ArticleAlbumPhoto?
+    @State private var musicOpen = false
+    private var photos: [ArticleAlbumPhoto] { ArticleAlbum.photos(in: store.drafts, configuration: store.site, shelf: shelf, query: query) }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                Picker("画像を使っている記事", selection: $shelf) {
+                    SwiftUI.Text("すべて").tag(Optional<ArticleShelf>.none)
+                    ForEach(ArticleShelf.allCases) { shelf in SwiftUI.Text(shelf.label).tag(Optional(shelf)) }
+                }.pickerStyle(.segmented).padding(.horizontal, 16).padding(.vertical, 8).accessibilityIdentifier("album-shelf")
+                if let error = store.storageError { SwiftUI.Text(error).font(.caption).foregroundStyle(.red).padding(.horizontal, 16) }
+                ScrollView {
+                    if photos.isEmpty {
+                        ContentUnavailableView(query.isEmpty ? "記事の写真はまだありません" : "画像が見つかりません",
+                            systemImage: "photo.on.rectangle.angled",
+                            description: SwiftUI.Text(query.isEmpty ? "記事の本文に挿入した画像が、ここに並びます。" : "記事名・写真の説明・タグを変えて探せます。"))
+                            .padding(.top, 60)
+                    } else {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 12)], spacing: 18) {
+                            ForEach(photos) { photo in
+                                Button { selected = photo } label: {
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        WriterPalette.surface.aspectRatio(1, contentMode: .fit)
+                                            .overlay { ArticleAlbumImage(photo: photo, files: store.imageFiles, dimension: 400, contentMode: .fill) }
+                                            .clipped().clipShape(RoundedRectangle(cornerRadius: 10))
+                                        if let use = photo.uses.first {
+                                            SwiftUI.Text(verbatim: use.title).font(.caption).foregroundStyle(WriterPalette.text).lineLimit(1)
+                                            HStack(spacing: 4) {
+                                                SwiftUI.Text(use.date, format: .dateTime.year().month().day())
+                                                if photo.uses.count > 1 { SwiftUI.Text("· \(photo.uses.count)記事") }
+                                            }.font(.caption2).foregroundStyle(WriterPalette.secondary).lineLimit(1)
+                                        }
+                                    }.contentShape(Rectangle())
+                                }.buttonStyle(.plain).accessibilityLabel((photo.uses.first?.caption ?? "写真") + " · " + (photo.uses.first?.title ?? ""))
+                                    .accessibilityIdentifier("album-photo-" + photo.id)
+                            }
+                        }.padding(16)
+                        SwiftUI.Text("\(photos.count)枚 · 記事に挿入した画像").font(.caption).foregroundStyle(WriterPalette.secondary).padding(.bottom, 16)
+                    }
+                }
+            }.background(WriterPalette.background).writerChrome().navigationTitle("アルバム").navigationBarTitleDisplayMode(.inline)
+                .searchable(text: $query, prompt: "記事名・写真の説明・タグ")
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { musicOpen = true } label: { Image(systemName: "music.note.list") }
+                            .accessibilityLabel("曲ストック").accessibilityIdentifier("album-open-music")
+                    }
+                }
+                .sheet(item: $selected) { photo in ArticleAlbumDetail(photoID: photo.id).environmentObject(store) }
+                .sheet(isPresented: $musicOpen) { MusicLibraryView(showsCloseButton: true) }
+        }
+    }
+}
+
+@MainActor private struct ArticleAlbumDetail: View {
+    @EnvironmentObject private var store: DraftStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var article: Draft?
+    let photoID: String
+    private var photo: ArticleAlbumPhoto? { ArticleAlbum.photos(in: store.drafts, configuration: store.site).first { $0.id == photoID } }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                if let photo {
+                    VStack(alignment: .leading, spacing: 18) {
+                        ArticleAlbumImage(photo: photo, files: store.imageFiles, dimension: 1600, contentMode: .fit)
+                            .frame(maxWidth: .infinity).frame(height: 360)
+                            .accessibilityLabel(photo.uses.first?.caption ?? "記事の写真")
+                        if let caption = photo.uses.first?.caption, !caption.isEmpty, caption != "写真" {
+                            SwiftUI.Text(verbatim: caption).font(.subheadline)
+                        }
+                        SwiftUI.Text("この画像を使っている記事").font(.subheadline.weight(.medium))
+                        ForEach(photo.uses) { use in
+                            Button {
+                                article = store.drafts.first { $0.id == use.articleID && $0.deletedAt == nil }
+                            } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        SwiftUI.Text(verbatim: use.title).font(.subheadline).foregroundStyle(WriterPalette.text)
+                                        HStack {
+                                            SwiftUI.Text(use.date, format: .dateTime.year().month().day())
+                                            SwiftUI.Text(use.isPublished ? "投稿済み" : "下書き")
+                                        }.font(.caption).foregroundStyle(WriterPalette.secondary)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(WriterPalette.secondary)
+                                }.padding(12).background(WriterPalette.surface, in: RoundedRectangle(cornerRadius: 10))
+                            }.buttonStyle(.plain).accessibilityIdentifier("album-open-article-" + use.articleID.uuidString)
+                        }
+                    }.padding(16)
+                } else {
+                    ContentUnavailableView("この記事の画像はありません", systemImage: "photo")
+                }
+            }.background(WriterPalette.background).writerChrome().navigationTitle("写真").navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("閉じる") { dismiss() } } }
+                .sheet(item: $article) { draft in NavigationStack { EditorView(draft: draft) } }
+        }
+    }
+}
+
+private struct ArticleAlbumImage: View {
+    let photo: ArticleAlbumPhoto
+    let files: ArticleImageFiles
+    let dimension: Int
+    let contentMode: ContentMode
+    @State private var localImage: UIImage?
+    @State private var checkedLocal = false
+
+    var body: some View {
+        Group {
+            if let localImage {
+                SwiftUI.Image(uiImage: localImage).resizable().aspectRatio(contentMode: contentMode)
+            } else if !checkedLocal {
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let url = photo.uses.compactMap(\.remoteURL).first {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image): image.resizable().aspectRatio(contentMode: contentMode)
+                    case .failure: unavailable
+                    default: ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                }
+            } else { unavailable }
+        }.task(id: photo.id) {
+            let images = photo.uses.compactMap(\.image)
+            let image = await Task.detached(priority: .utility) { () -> UIImage? in
+                for image in images {
+                    guard let data = try? files.read(image), let source = CGImageSourceCreateWithData(data as CFData, nil),
+                          let pixels = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                            kCGImageSourceCreateThumbnailFromImageAlways: true,
+                            kCGImageSourceCreateThumbnailWithTransform: true,
+                            kCGImageSourceThumbnailMaxPixelSize: dimension
+                          ] as CFDictionary) else { continue }
+                    return UIImage(cgImage: pixels)
+                }
+                return nil
+            }.value
+            guard !Task.isCancelled else { return }
+            localImage = image; checkedLocal = true
+        }
+    }
+
+    private var unavailable: some View {
+        VStack(spacing: 6) {
+            SwiftUI.Image(systemName: "photo").font(.title2)
+            SwiftUI.Text("画像を読み込めません").font(.caption2)
+        }.foregroundStyle(WriterPalette.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
