@@ -51,6 +51,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - run: xcodebuild -version
+      - name: Test Mac signing order
+        run: python3 tools/test_mac_signing.py
       - name: Test Mac Catalyst
         run: python3 tools/test-mac.py
       - name: Upload Mac test results
