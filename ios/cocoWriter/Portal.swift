@@ -35,10 +35,19 @@ import UIKit
         #if !targetEnvironment(macCatalyst)
         .sheet(item: $editingSharedDraft) { draft in NavigationStack { EditorView(draft: draft) } }
         #endif
-        .task { purgeTrash(); receiveMusic() }
+        .task { purgeTrash(); receiveMusic(); privateNotes.synchronizeWidget() }
         .onChange(of: drafts.drafts) { _, _ in musicLibrary.reconcile(from: drafts) }
         .onChange(of: drafts.storageError) { _, error in if error == nil { musicLibrary.reconcile(from: drafts) } }
-        .onChange(of: scenePhase) { _, phase in if phase == .active { purgeTrash(); receiveMusic() } }
+        .onChange(of: scenePhase) { _, phase in if phase == .active { purgeTrash(); receiveMusic(); privateNotes.synchronizeWidget() } }
+        .onReceive(Timer.publish(every: 5, on: .main, in: .common).autoconnect()) { _ in
+            if scenePhase == .active { privateNotes.synchronizeWidget() }
+        }
+        .onOpenURL { url in
+            guard url.scheme?.lowercased() == Bundle.main.bundleIdentifier?.lowercased(), url.host == "todos" else { return }
+            privateNotes.synchronizeWidget()
+            tab = 1
+            privateNotes.widgetTasksRequested = true
+        }
     }
     private func purgeTrash() {
         _ = drafts.purgeExpiredTrash()
@@ -625,7 +634,7 @@ private struct CompactArticleRow: View {
                             Menu {
                                 Button("日付で見る", systemImage: "calendar") { browsingAll = false; selectedTag = nil; query = ""; searching = false; tasksOnly = false }
                                 Button("タグ・すべてのメモ", systemImage: "number") {
-                                    browsingAll = true; tasksOnly = false; selectedTag = nil; query = ""; searching = false; filter = nil
+                                    showTagSearch()
                                 }
                                 Button("タグを管理", systemImage: "slider.horizontal.3") { managingTags = true }
                                 Button("検索", systemImage: "magnifyingglass") { searching.toggle(); browsingAll = true; if !searching { query = "" } }
@@ -646,6 +655,8 @@ private struct CompactArticleRow: View {
                                 Text("\(PrivateNoteTimeline.pendingTasks(store.notes).count)").font(.writerCaption).monospacedDigit()
                             }
                         }.accessibilityLabel("未完了のTODO一覧").accessibilityIdentifier("note-open-tasks")
+                        Button { showTagSearch() } label: { Image(systemName: "number") }
+                            .accessibilityLabel("タグで探す").accessibilityIdentifier("note-open-tags")
                         if browsingAll || !Calendar.current.isDateInToday(selectedDay) {
                             Button("今日") { selectedDay = Calendar.current.startOfDay(for: Date()); browsingAll = false; selectedTag = nil; query = ""; searching = false; tasksOnly = false }
                                 .font(.subheadline).accessibilityIdentifier("note-today")
@@ -666,6 +677,8 @@ private struct CompactArticleRow: View {
                 .onChange(of: tags) { _, values in
                     if let selectedTag, !values.contains(where: { NoteTags.key($0) == NoteTags.key(selectedTag) }) { self.selectedTag = nil }
                 }
+                .onAppear { openWidgetTasksIfNeeded() }
+                .onChange(of: store.widgetTasksRequested) { _, _ in openWidgetTasksIfNeeded() }
                 .sheet(item: $selected) { note in
                     PrivateNoteEditor(note: note).environmentObject(store)
                         .presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
@@ -722,7 +735,7 @@ private struct CompactArticleRow: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 16) {
                         tagFilter("すべて", tag: nil).accessibilityIdentifier("note-filter-all")
-                        Button { tasksOnly.toggle() } label: {
+                        Button { tasksOnly.toggle(); selectedTag = nil } label: {
                             Label("TODO", systemImage: "checklist").font(.subheadline.weight(tasksOnly ? .semibold : .regular))
                                 .foregroundStyle(tasksOnly ? WriterPalette.text : WriterPalette.secondary).padding(.vertical, 4)
                                 .overlay(alignment: .bottom) { if tasksOnly { Rectangle().fill(WriterPalette.text.opacity(0.65)).frame(height: 1) } }
@@ -765,9 +778,23 @@ private struct CompactArticleRow: View {
         }
     }
 
+    private func openWidgetTasksIfNeeded() {
+        guard store.widgetTasksRequested else { return }
+        store.widgetTasksRequested = false
+        tasksOpen = true
+    }
+
+    private func showTagSearch() {
+        browsingAll = true; tasksOnly = false; selectedTag = nil; query = ""; searching = false; filter = nil
+    }
+
+    private func selectTag(_ tag: String?) {
+        selectedTag = tag; tasksOnly = false; browsingAll = true
+    }
+
     private func tagFilter(_ label: String, tag: String?) -> some View {
         let active = tag.map { NoteTags.key($0) == selectedTag.map(NoteTags.key) } ?? (selectedTag == nil && !tasksOnly)
-        return Button { selectedTag = tag; if tag == nil { tasksOnly = false } } label: {
+        return Button { selectTag(tag) } label: {
             Text(label).font(.subheadline.weight(active ? .semibold : .regular))
                 .foregroundStyle(active ? WriterPalette.text : WriterPalette.secondary).padding(.vertical, 4)
                 .overlay(alignment: .bottom) { if active { Rectangle().fill(WriterPalette.text.opacity(0.65)).frame(height: 1) } }
@@ -806,7 +833,7 @@ private struct CompactArticleRow: View {
                 .accessibilityValue(selection.contains(note.id) ? "選択済み" : "")
                 .contextMenu {
                     Button("編集", systemImage: "pencil") { selected = note }
-                    ForEach(note.tags, id: \.self) { tag in Button("#" + tag + "を見る", systemImage: "number") { selectedTag = tag; browsingAll = true } }
+                    ForEach(note.tags, id: \.self) { tag in Button("#" + tag + "を見る", systemImage: "number") { selectTag(tag) } }
                     Button(note.pinnedAt == nil ? "ピン留め" : "ピン解除", systemImage: "pin") { store.togglePin(note.id) }
                     Button("ゴミ箱へ移動", systemImage: "trash", role: .destructive) { store.moveToTrash([note.id]) }
                 }
@@ -966,7 +993,7 @@ private struct NoteTaskDeadlinePicker: View {
                             quickDate("1週間後", offset: 7)
                             Spacer(minLength: 0)
                         }.padding(.horizontal, 16)
-                        NoteTaskCalendar(visibleDate: date ?? Date()) { chosen in
+                        NoteTaskCalendar(selectedDate: date) { chosen in
                             date = Calendar.current.startOfDay(for: chosen)
                             calendarOpen = false
                         }.frame(height: 360).padding(.horizontal, 12)
@@ -991,13 +1018,12 @@ private struct NoteTaskDeadlinePicker: View {
     }
 }
 
-// Start with no selection so even today's date or the existing deadline can be
-// chosen with one tap. DatePicker's change-only binding misses those selections.
+// Restore the deadline as the native calendar selection when reopening the picker.
 private struct NoteTaskCalendar: UIViewRepresentable {
-    var visibleDate: Date
+    var selectedDate: Date?
     var choose: (Date) -> Void
 
-    func makeCoordinator() -> Coordinator { Coordinator(choose: choose) }
+    func makeCoordinator() -> Coordinator { Coordinator(selectedDate: selectedDate, choose: choose) }
 
     func makeUIView(context: Context) -> UICalendarView {
         let view = UICalendarView()
@@ -1005,18 +1031,33 @@ private struct NoteTaskCalendar: UIViewRepresentable {
         view.locale = Locale(identifier: "ja_JP")
         view.timeZone = Calendar.current.timeZone
         view.tintColor = UIColor(WriterPalette.accent)
-        view.visibleDateComponents = Calendar.current.dateComponents([.era, .year, .month, .day], from: visibleDate)
-        view.selectionBehavior = UICalendarSelectionSingleDate(delegate: context.coordinator)
+        view.visibleDateComponents = Calendar.current.dateComponents([.era, .year, .month, .day], from: selectedDate ?? Date())
+        let selection = UICalendarSelectionSingleDate(delegate: context.coordinator)
+        view.selectionBehavior = selection
+        selection.setSelected(selectedDate.map { Calendar.current.dateComponents([.era, .year, .month, .day], from: $0) }, animated: false)
         return view
     }
 
-    func updateUIView(_ view: UICalendarView, context: Context) { context.coordinator.choose = choose }
+    func updateUIView(_ view: UICalendarView, context: Context) {
+        context.coordinator.choose = choose
+        context.coordinator.selectedDate = selectedDate
+        let components = selectedDate.map { Calendar.current.dateComponents([.era, .year, .month, .day], from: $0) }
+        if let selection = view.selectionBehavior as? UICalendarSelectionSingleDate,
+           selection.selectedDate != components {
+            selection.setSelected(components, animated: false)
+        }
+    }
 
     final class Coordinator: NSObject, UICalendarSelectionSingleDateDelegate {
         var choose: (Date) -> Void
-        init(choose: @escaping (Date) -> Void) { self.choose = choose }
+        var selectedDate: Date?
+        init(selectedDate: Date?, choose: @escaping (Date) -> Void) {
+            self.selectedDate = selectedDate
+            self.choose = choose
+        }
         func dateSelection(_ selection: UICalendarSelectionSingleDate, didSelectDate dateComponents: DateComponents?) {
-            guard let dateComponents, let date = Calendar.current.date(from: dateComponents) else { return }
+            // Keep the current deadline if UIKit clears the selection.
+            guard let date = dateComponents.flatMap({ Calendar.current.date(from: $0) }) ?? selectedDate else { return }
             choose(date)
         }
     }
@@ -1259,6 +1300,11 @@ private struct NoteComposerField: View {
                     ToolbarItem(placement: .confirmationAction) { Button("完了") { if store.update(note) { dismiss() } } }
                 }
                 .interactiveDismissDisabled(store.storageError != nil)
+                .onChange(of: store.notes) { _, values in
+                    if let latest = values.first(where: { $0.id == note.id }) {
+                        note = note.synchronizingTaskCompletion(from: latest)
+                    }
+                }
                 .onChange(of: note) { _, value in store.update(value) }
                 .onChange(of: scenePhase) { _, phase in if phase != .active { store.update(note) } }
                 .sheet(isPresented: $managingTags) { NoteTagManagementView().environmentObject(store) }

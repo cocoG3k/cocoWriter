@@ -19,10 +19,10 @@ configuration = json.loads(runtime.read_text())
 old_group = configuration["appGroupIdentifier"]
 group = "group." + args.bundle_id
 project.write_text(source.replace(old, args.bundle_id))
-for path in [root / "cocoWriter/cocoWriter.entitlements", root / "ShareExtension/ShareExtension.entitlements"]:
+for path in [root / "cocoWriter/cocoWriter.entitlements", root / "ShareExtension/ShareExtension.entitlements", root / "TodoWidget/TodoWidget.entitlements"]:
     path.write_text(path.read_text().replace(old_group, group))
 configuration["appGroupIdentifier"] = group
 runtime.write_text(json.dumps(configuration, ensure_ascii=False, indent=2) + "\n")
 print("Bundle Identifier:", args.bundle_id)
 print("App Group:", group)
-print("Xcodeで本体と共有拡張に自分のTeamを設定してください。")
+print("Xcodeで本体・共有拡張・TODOウィジェットに自分のTeamを設定してください。")

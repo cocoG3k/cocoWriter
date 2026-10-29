@@ -14,13 +14,15 @@ validate_app = runpy.run_path(str(root / "tools/configure-variant.py"))["validat
 for profile in (root / "config/app").glob("*.json"):
     validate_app(json.loads(profile.read_text()))
 runtime = json.loads((root / "ios/cocoWriter/WriterConfiguration.json").read_text())
-for entitlement in [root / "ios/cocoWriter/cocoWriter.entitlements", root / "ios/ShareExtension/ShareExtension.entitlements"]:
+for entitlement in [root / "ios/cocoWriter/cocoWriter.entitlements", root / "ios/ShareExtension/ShareExtension.entitlements", root / "ios/TodoWidget/TodoWidget.entitlements"]:
     assert plistlib.loads(entitlement.read_bytes())["com.apple.security.application-groups"] == [runtime["appGroupIdentifier"]], "App Group differs from runtime configuration"
 for profile in list((root / "config").glob("*.json")) + [root / "ios/cocoWriter/BlogProfile.json", root / "site-template/blog-profile.json"]:
     validate_profile(json.loads(profile.read_text()))
 project = (root / "ios/cocoWriter.xcodeproj/project.pbxproj").read_text()
 for p in (root / "ios/cocoWriter").glob("*.swift"):
     assert p.name in project, "Missing Xcode reference: " + p.name
+for p in (root / "ios/TodoWidget").glob("*.swift"):
+    assert p.name in project, "Missing widget reference: " + p.name
 for p in (root / "ios/Tests").glob("*.swift"):
     assert p.name in project, "Missing test reference: " + p.name
 for p in (root / "ios").rglob("*.xcscheme"):

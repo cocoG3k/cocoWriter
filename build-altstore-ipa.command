@@ -32,6 +32,7 @@ mkdir -p "$stage_path/Payload"
 /usr/bin/ditto "$app_path" "$stage_path/Payload/cocoWriter.app"
 # Preserve App Group entitlements for AltStore to inspect before re-signing.
 # Ad-hoc signing uses no account/certificate and cannot install on an iPhone.
+/usr/bin/codesign --force --sign - --entitlements "$variant_ios/TodoWidget/TodoWidget.entitlements" "$stage_path/Payload/cocoWriter.app/PlugIns/cocoWriterTodos.appex"
 /usr/bin/codesign --force --sign - --entitlements "$variant_ios/ShareExtension/ShareExtension.entitlements" "$stage_path/Payload/cocoWriter.app/PlugIns/cocoWriterShare.appex"
 /usr/bin/codesign --force --sign - --entitlements "$variant_ios/cocoWriter/cocoWriter.entitlements" "$stage_path/Payload/cocoWriter.app"
 /usr/bin/codesign --verify --deep --strict "$stage_path/Payload/cocoWriter.app"
