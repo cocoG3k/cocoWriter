@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import WidgetKit
 
 enum NoteKind: String, Codable, CaseIterable, Identifiable {
     case memo, journal
@@ -22,6 +23,16 @@ struct PrivateNote: Codable, Equatable, Identifiable {
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         if !title.isEmpty { return title }
         return body.split(whereSeparator: \.isNewline).first.map { String($0.prefix(60)) } ?? "空のメモ"
+    }
+    // An editor may remain open while a Home Screen widget completes this task.
+    // Merge only the newer completion state, retaining any text being edited.
+    func synchronizingTaskCompletion(from latest: PrivateNote) -> PrivateNote {
+        guard latest.id == id, latest.updatedAt > updatedAt, task != nil, latest.task != nil,
+              latest.task?.completedAt != task?.completedAt else { return self }
+        var value = self
+        value.task?.completedAt = latest.task?.completedAt
+        value.updatedAt = latest.updatedAt
+        return value
     }
     var tags: [String] { NoteTags.extract(from: body) }
     var displayBody: String { NoteTags.removing(from: body) }
@@ -217,7 +228,10 @@ enum PrivateNoteTimeline {
     private let url: URL
     private let tagURL: URL
     private let preferences: UserDefaults
-    init(url: URL? = nil, tagURL: URL? = nil, preferences: UserDefaults = .standard) {
+    private let widgetDirectory: URL?
+    @Published var widgetTasksRequested = false
+    init(url: URL? = nil, tagURL: URL? = nil, preferences: UserDefaults = .standard, widgetDirectory: URL? = nil) {
+        self.widgetDirectory = widgetDirectory ?? (url == nil ? TaskWidgetData.directory : nil)
         self.preferences = preferences
         self.url = url ?? AppConfiguration.current.storageURL("private-notes.json")
         self.tagURL = tagURL ?? self.url.deletingLastPathComponent().appendingPathComponent("private-note-tags.json")
@@ -233,6 +247,7 @@ enum PrivateNoteTimeline {
         } catch { tagStorageError = "タグの設定を読み込めません。元ファイルを保護するため変更を停止しました。\(error.localizedDescription)" }
         _ = purgeExpiredTrash()
         removeUnusedTags()
+        synchronizeWidget()
     }
     var active: [PrivateNote] {
         notes.filter { $0.deletedAt == nil }.sorted {
@@ -308,6 +323,12 @@ enum PrivateNoteTimeline {
     }
     @discardableResult func update(_ note: PrivateNote) -> Bool {
         guard loaded else { return false }
+        // Foreground/background saves must not invalidate a widget command when
+        // no content changed (the editor may still hold an older save timestamp).
+        if storageError == nil, let current = notes.first(where: { $0.id == note.id }) {
+            var unchanged = note; unchanged.updatedAt = current.updatedAt
+            if unchanged == current { return true }
+        }
         let previousTags = Set(notes.first(where: { $0.id == note.id })?.tags.map(NoteTags.key) ?? [])
         var value = note; value.updatedAt = Date()
         if let index = notes.firstIndex(where: { $0.id == note.id }) { notes[index] = value } else { notes.insert(value, at: 0) }
@@ -322,6 +343,7 @@ enum PrivateNoteTimeline {
             try JSONEncoder().encode(notes).write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])
             storageError = nil
             removeUnusedTags()
+            publishWidget()
             return true
         } catch { storageError = "メモを保存できません。アプリを閉じず、容量などを確認して再保存してください。\(error.localizedDescription)"; return false }
     }
@@ -350,6 +372,44 @@ enum PrivateNoteTimeline {
         next[index].updatedAt = now
         return commit(next)
     }
+    // Commands are durable and idempotent. The extension never rewrites the notes file.
+    func synchronizeWidget() {
+        guard loaded, storageError == nil, let widgetDirectory else { return }
+        do {
+            let commands = try TaskWidgetData.completions(in: widgetDirectory)
+            var next = notes
+            for (_, command) in commands {
+                guard let index = next.firstIndex(where: { $0.id == command.taskID && $0.deletedAt == nil }),
+                      next[index].task?.isCompleted == false,
+                      next[index].updatedAt == command.expectedUpdate else { continue }
+                next[index].task?.completedAt = command.completedAt
+                next[index].updatedAt = command.completedAt
+            }
+            if next != notes, !commit(next) { return }
+            for (url, _) in commands { try FileManager.default.removeItem(at: url) }
+            publishWidget()
+        } catch {
+            // Leave unprocessed commands in place to retry on the next foreground sync.
+        }
+    }
+
+    private func publishWidget() {
+        guard loaded, let widgetDirectory else { return }
+        let tasks = PrivateNoteTimeline.pendingTasks(notes).map { note in
+            let title = note.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let body = note.displayBody.split(whereSeparator: \.isNewline).first.map(String.init) ?? "TODO"
+            return WidgetTask(id: note.id, title: String((title.isEmpty ? body : title).prefix(160)), dueDate: note.task?.dueDate,
+                              createdAt: note.date, updatedAt: note.updatedAt)
+        }
+        do {
+            let value = TaskWidgetSnapshot(tasks: tasks)
+            if (try? JSONDecoder().decode(TaskWidgetSnapshot.self, from: Data(contentsOf: widgetDirectory.appendingPathComponent("tasks.json")))) != value {
+                try TaskWidgetData.publish(tasks, to: widgetDirectory)
+                WidgetCenter.shared.reloadTimelines(ofKind: TaskWidgetData.kind)
+            }
+        } catch { /* Notes remain saved even if the widget container is unavailable. */ }
+    }
+
     private func commit(_ next: [PrivateNote]) -> Bool {
         let previous = notes; notes = next
         if persist() { return true }; notes = previous; return false

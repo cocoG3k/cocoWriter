@@ -84,6 +84,7 @@ struct MacWriterCommands: Commands {
 }
 
 @MainActor struct MacWorkspaceView: View {
+    @EnvironmentObject private var privateNotes: PrivateNoteStore
     @EnvironmentObject private var store: DraftStore
     @AppStorage("mac-appearance") private var macAppearance = "dark"
     @Binding var sharedArticle: Draft?
@@ -115,6 +116,9 @@ struct MacWriterCommands: Commands {
         })
         .focusedSceneValue(\.writerNewArticle, interactionLocked || destination != .articles ? nil : { createArticle() })
         .focusedSceneValue(\.writerSettings, interactionLocked ? nil : { destination = .settings })
+        .onChange(of: privateNotes.widgetTasksRequested) { _, requested in
+            if requested && !interactionLocked { destination = .notes }
+        }
         .onChange(of: sharedArticle?.id) { _, _ in
             openSharedArticle()
         }

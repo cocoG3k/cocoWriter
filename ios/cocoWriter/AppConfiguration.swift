@@ -44,6 +44,16 @@ struct AppConfiguration: Codable, Equatable {
         }
         return value
     }
+    static func sharedContainerURL(bundle: Bundle = .main) -> URL? {
+        guard configurationError == nil else { return nil }
+        let groupID = current.appGroupIdentifier
+        let rewritten = (bundle.object(forInfoDictionaryKey: "ALTAppGroups") as? [String] ?? [])
+            .filter { $0 == groupID || $0.hasPrefix(groupID + ".") }
+        for id in rewritten + [groupID] {
+            if let url = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: id) { return url }
+        }
+        return nil
+    }
     func storageURL(_ name: String, applicationSupport: URL? = nil) -> URL {
         let root = applicationSupport ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return root.appendingPathComponent(storageDirectory, isDirectory: true).appendingPathComponent(name)

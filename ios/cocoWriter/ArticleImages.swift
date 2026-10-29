@@ -473,69 +473,113 @@ enum ArticleAlbum {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                Picker("画像を使っている記事", selection: $shelf) {
-                    SwiftUI.Text("すべて").tag(Optional<ArticleShelf>.none)
-                    ForEach(ArticleShelf.allCases) { shelf in SwiftUI.Text(shelf.label).tag(Optional(shelf)) }
-                }.pickerStyle(.segmented).padding(.horizontal, 16).padding(.vertical, 8).accessibilityIdentifier("album-shelf")
-                if let error = store.storageError { SwiftUI.Text(error).font(.writerCaption).foregroundStyle(.red).padding(.horizontal, 16) }
-                ScrollView {
-                    if photos.isEmpty {
-                        ContentUnavailableView(query.isEmpty ? "記事の写真はまだありません" : "画像が見つかりません",
-                            systemImage: "photo.on.rectangle.angled",
-                            description: SwiftUI.Text(query.isEmpty ? "記事の本文に挿入した画像が、ここに並びます。" : "記事名・写真の説明・タグを変えて探せます。"))
-                            .padding(.top, 60)
-                    } else {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 12)], spacing: 18) {
-                            ForEach(photos) { photo in
-                                Button { selected = photo } label: {
-                                    VStack(alignment: .leading, spacing: 5) {
-                                        WriterPalette.surface.aspectRatio(1, contentMode: .fit)
-                                            .overlay { ArticleAlbumImage(photo: photo, files: store.imageFiles, dimension: 400, contentMode: .fill) }
-                                            .clipped().clipShape(RoundedRectangle(cornerRadius: 10))
-                                        if let use = photo.uses.first {
-                                            #if targetEnvironment(macCatalyst)
-                                            SwiftUI.Text(verbatim: use.title).font(.writerCaption).foregroundStyle(WriterPalette.text)
-                                                .fixedSize(horizontal: false, vertical: true)
-                                                .frame(maxWidth: .infinity, alignment: .leading)
-                                            #else
-                                            SwiftUI.Text(verbatim: use.title).font(.writerCaption).foregroundStyle(WriterPalette.text).lineLimit(1)
-                                            #endif
-                                            #if targetEnvironment(macCatalyst)
-                                            ViewThatFits(in: .horizontal) {
-                                                HStack(spacing: 4) {
-                                                    SwiftUI.Text(use.date, format: .dateTime.year().month().day())
-                                                    if photo.uses.count > 1 { SwiftUI.Text("· \(photo.uses.count)記事") }
-                                                }.fixedSize(horizontal: true, vertical: false)
-                                                VStack(alignment: .leading, spacing: 2) {
-                                                    SwiftUI.Text(use.date, format: .dateTime.year().month().day())
-                                                    if photo.uses.count > 1 { SwiftUI.Text("\(photo.uses.count)記事") }
-                                                }
-                                            }.font(.writerCaption2).foregroundStyle(WriterPalette.secondary)
-                                            #else
-                                            HStack(spacing: 4) {
-                                                SwiftUI.Text(use.date, format: .dateTime.year().month().day())
-                                                if photo.uses.count > 1 { SwiftUI.Text("· \(photo.uses.count)記事") }
-                                            }.font(.writerCaption2).foregroundStyle(WriterPalette.secondary).lineLimit(1)
-                                            #endif
-                                        }
-                                    }.contentShape(Rectangle())
-                                }.buttonStyle(.plain).accessibilityLabel((photo.uses.first?.caption ?? "写真") + " · " + (photo.uses.first?.title ?? ""))
-                                    .accessibilityIdentifier("album-photo-" + photo.id)
-                            }
-                        }.padding(16)
-                        SwiftUI.Text("\(photos.count)枚 · 記事に挿入した画像").font(.writerCaption).foregroundStyle(WriterPalette.secondary).padding(.bottom, 16)
-                    }
+                shelfPicker
+                if let error = store.storageError {
+                    SwiftUI.Text(error).font(.writerCaption).foregroundStyle(.red).padding(.horizontal, 16)
                 }
-            }.background(WriterPalette.background).writerChrome().navigationTitle("アルバム").navigationBarTitleDisplayMode(.inline)
-                .searchable(text: $query, prompt: "記事名・写真の説明・タグ")
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button { musicOpen = true } label: { Image(systemName: "music.note.list") }
-                            .accessibilityLabel("曲ストック").accessibilityIdentifier("album-open-music")
-                    }
+                albumContent
+            }
+            .background(WriterPalette.background).writerChrome()
+            .navigationTitle("アルバム").navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $query, prompt: "記事名・写真の説明・タグ")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { musicOpen = true } label: { Image(systemName: "music.note.list") }
+                        .accessibilityLabel("曲ストック").accessibilityIdentifier("album-open-music")
                 }
-                .sheet(item: $selected) { photo in ArticleAlbumDetail(photoID: photo.id).environmentObject(store) }
-                .sheet(isPresented: $musicOpen) { MusicLibraryView(showsCloseButton: true) }
+            }
+            .sheet(item: $selected) { photo in ArticleAlbumDetail(photoID: photo.id).environmentObject(store) }
+            .sheet(isPresented: $musicOpen) { MusicLibraryView(showsCloseButton: true) }
+        }
+    }
+
+    private var shelfPicker: some View {
+        Picker("画像を使っている記事", selection: $shelf) {
+            SwiftUI.Text("すべて").tag(Optional<ArticleShelf>.none)
+            ForEach(ArticleShelf.allCases) { shelf in SwiftUI.Text(shelf.label).tag(Optional(shelf)) }
+        }.pickerStyle(.segmented).padding(.horizontal, 16).padding(.vertical, 8).accessibilityIdentifier("album-shelf")
+    }
+
+    private var albumContent: some View {
+        ScrollView {
+            if photos.isEmpty {
+                ContentUnavailableView(query.isEmpty ? "記事の写真はまだありません" : "画像が見つかりません",
+                    systemImage: "photo.on.rectangle.angled",
+                    description: SwiftUI.Text(query.isEmpty ? "記事の本文に挿入した画像が、ここに並びます。" : "記事名・写真の説明・タグを変えて探せます。"))
+                    .padding(.top, 60)
+            } else {
+                photoGrid
+                SwiftUI.Text("\(photos.count)枚 · 記事に挿入した画像").font(.writerCaption)
+                    .foregroundStyle(WriterPalette.secondary).padding(.bottom, 16)
+            }
+        }
+    }
+
+    private var photoGrid: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 12)], spacing: 18) {
+            ForEach(photos) { photo in
+                Button { selected = photo } label: {
+                    ArticleAlbumTile(photo: photo, files: store.imageFiles)
+                }.buttonStyle(.plain)
+                    .accessibilityLabel((photo.uses.first?.caption ?? "写真") + " · " + (photo.uses.first?.title ?? ""))
+                    .accessibilityIdentifier("album-photo-" + photo.id)
+            }
+        }.padding(16)
+    }
+}
+
+// Keep each view small enough for the CI compiler to type-check independently.
+@MainActor private struct ArticleAlbumTile: View {
+    let photo: ArticleAlbumPhoto
+    let files: ArticleImageFiles
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            WriterPalette.surface.aspectRatio(1, contentMode: .fit)
+                .overlay { ArticleAlbumImage(photo: photo, files: files, dimension: 400, contentMode: .fill) }
+                .clipped().clipShape(RoundedRectangle(cornerRadius: 10))
+            if let use = photo.uses.first {
+                title(use.title)
+                ArticleAlbumTileMetadata(date: use.date, count: photo.uses.count)
+            }
+        }.contentShape(Rectangle())
+    }
+
+    private func title(_ text: String) -> some View {
+        SwiftUI.Text(verbatim: text).font(.writerCaption).foregroundStyle(WriterPalette.text)
+        #if targetEnvironment(macCatalyst)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        #else
+            .lineLimit(1)
+        #endif
+    }
+}
+
+private struct ArticleAlbumTileMetadata: View {
+    let date: Date
+    let count: Int
+
+    var body: some View {
+        Group {
+            #if targetEnvironment(macCatalyst)
+            ViewThatFits(in: .horizontal) {
+                inlineMetadata.fixedSize(horizontal: true, vertical: false)
+                VStack(alignment: .leading, spacing: 2) {
+                    SwiftUI.Text(date, format: .dateTime.year().month().day())
+                    if count > 1 { SwiftUI.Text("\(count)記事") }
+                }
+            }
+            #else
+            inlineMetadata.lineLimit(1)
+            #endif
+        }.font(.writerCaption2).foregroundStyle(WriterPalette.secondary)
+    }
+
+    private var inlineMetadata: some View {
+        HStack(spacing: 4) {
+            SwiftUI.Text(date, format: .dateTime.year().month().day())
+            if count > 1 { SwiftUI.Text("· \(count)記事") }
         }
     }
 }

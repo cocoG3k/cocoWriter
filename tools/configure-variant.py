@@ -69,13 +69,14 @@ def generate(profile_path, output):
     source = ROOT / "ios"
     project = (source / "cocoWriter.xcodeproj/project.pbxproj").read_text()
     # Source groups point to the canonical source tree; only configuration is duplicated.
-    for group in ("cocoWriter", "Tests", "ShareExtension"):
+    for group in ("cocoWriter", "Tests", "ShareExtension", "TodoWidget"):
         relative = Path(os.path.relpath(source / group, output)).as_posix()
         project = project.replace("path = " + group + ";", "path = " + json.dumps(relative) + ";")
     for name in ("WriterConfiguration.json", "BlogProfile.json", "BlogPreviewTemplate.html"):
         project = re.sub(r"(path = )" + re.escape(name) + r'; sourceTree = "<group>";', r'\1"cocoWriter/' + name + '"; sourceTree = SOURCE_ROOT;', project)
     project = re.sub(r"(path = )README.md; sourceTree = \"<group>\";", r'\1' + json.dumps(Path(os.path.relpath(source / "README.md", output)).as_posix()) + '; sourceTree = SOURCE_ROOT;', project)
     canonical = re.search(r"PRODUCT_BUNDLE_IDENTIFIER = ([A-Za-z0-9.-]+);", project).group(1)
+    project = project.replace(canonical + ".Todos;", profile["bundleIdentifier"] + ".Todos;")
     project = project.replace(canonical + ".Share;", profile["extensionBundleIdentifier"] + ";")
     project = project.replace(canonical + ".Tests;", profile["bundleIdentifier"] + ".Tests;")
     project = project.replace(canonical + ";", profile["bundleIdentifier"] + ";")
@@ -94,7 +95,11 @@ def generate(profile_path, output):
     share = output / "ShareExtension"
     app.mkdir(exist_ok=True)
     share.mkdir(exist_ok=True)
-    for folder, filename in ((app, "cocoWriter.entitlements"), (share, "ShareExtension.entitlements")):
+    widget = output / "TodoWidget"
+    widget.mkdir(exist_ok=True)
+    shutil.copy2(source / "cocoWriter/Info.plist", app / "Info.plist")
+    shutil.copy2(source / "TodoWidget/Info.plist", widget / "Info.plist")
+    for folder, filename in ((app, "cocoWriter.entitlements"), (share, "ShareExtension.entitlements"), (widget, "TodoWidget.entitlements")):
         with (folder / filename).open("wb") as f:
             plistlib.dump({"com.apple.security.application-groups": [profile["appGroupIdentifier"]]}, f)
     info = plistlib.loads((source / "ShareExtension/Info.plist").read_bytes())

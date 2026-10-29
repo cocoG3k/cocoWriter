@@ -3,6 +3,7 @@ on:
   push:
     branches: ["**"]
   pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
@@ -34,3 +35,33 @@ jobs:
       - run: python3 tools/test_build_profiles.py
       - run: python3 tools/test_app_variants.py
       - run: python3 tools/test-ios.py
+      - name: Upload iOS test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-test-results
+          path: .build-cache/main/Logs/Test/*.xcresult
+          if-no-files-found: ignore
+          retention-days: 7
+  mac:
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v6
+      - run: xcodebuild -version
+      - name: Test Mac signing order
+        run: python3 tools/test_mac_signing.py
+      - name: Test Mac Catalyst
+        run: python3 tools/test-mac.py
+      - name: Upload Mac test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mac-test-results
+          path: |
+            .build-cache/mac-tests/tests-*.xcresult
+            .build-cache/mac-tests/XCTest-*.log
+          if-no-files-found: ignore
+          retention-days: 7

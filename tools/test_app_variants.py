@@ -38,20 +38,21 @@ class AppVariantTests(unittest.TestCase):
             text = (project / "project.pbxproj").read_text()
             self.assertIn("PRODUCT_BUNDLE_IDENTIFIER = org.example.ExistingWriter;", text)
             self.assertIn("PRODUCT_BUNDLE_IDENTIFIER = org.example.ExistingWriter.Shared;", text)
+            self.assertIn("PRODUCT_BUNDLE_IDENTIFIER = org.example.ExistingWriter.Todos;", text)
             self.assertIn('path = "cocoWriter/WriterConfiguration.json"; sourceTree = SOURCE_ROOT;', text)
-            for group in ["cocoWriter", "Tests", "ShareExtension"]:
+            for group in ["cocoWriter", "Tests", "ShareExtension", "TodoWidget"]:
                 relative = os.path.relpath(ROOT / "ios" / group, output.resolve())
                 self.assertTrue('path = ' + json.dumps(relative) + ';' in text, "Missing shared source group: " + group)
             self.assertFalse((output / "cocoWriter/Store.swift").exists(), "A variant must use shared sources, not a forked copy")
             config = json.loads((output / "cocoWriter/WriterConfiguration.json").read_text())
             for key in variant["RUNTIME_KEYS"]:
                 self.assertEqual(config[key], profile[key])
-            for folder, name in [("cocoWriter", "cocoWriter.entitlements"), ("ShareExtension", "ShareExtension.entitlements")]:
+            for folder, name in [("cocoWriter", "cocoWriter.entitlements"), ("ShareExtension", "ShareExtension.entitlements"), ("TodoWidget", "TodoWidget.entitlements")]:
                 value = plistlib.loads((output / folder / name).read_bytes())
                 self.assertEqual(value["com.apple.security.application-groups"], [profile["appGroupIdentifier"]])
             self.assertEqual(plistlib.loads((output / "ShareExtension/Info.plist").read_bytes())["CFBundleDisplayName"], "Existing Writer")
-            self.assertEqual(text.count("MARKETING_VERSION = 1.2.3;"), 4)
-            self.assertEqual(text.count("CURRENT_PROJECT_VERSION = 12;"), 4)
+            self.assertEqual(text.count("MARKETING_VERSION = 1.2.3;"), 6)
+            self.assertEqual(text.count("CURRENT_PROJECT_VERSION = 12;"), 6)
             self.assertEqual(variant["generate"](file, output), project)
             self.assertEqual((ROOT / "ios/cocoWriter.xcodeproj/project.pbxproj").read_bytes(), original)
 

@@ -12,6 +12,26 @@ import subprocess
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def sign_test_products(app, test_bundles, testing_entitlements, share_entitlements, env):
+    """Re-sign embedded test code from the inside out, then seal the host last."""
+    sign = ["codesign", "--force", "--sign", "-"]
+    roots = [app] + test_bundles
+    dylibs = {p for folder in roots for p in folder.rglob("*.dylib") if not p.is_symlink()}
+    for dylib in sorted(dylibs):
+        subprocess.run(sign + [str(dylib)], env=env, check=True, capture_output=True)
+    # Xcode embeds testing frameworks (including XCUIAutomation). Signing their
+    # dylibs changes their resource seals, so each enclosing bundle needs signing.
+    bundles = set(test_bundles)
+    for folder in roots:
+        bundles.update(p for p in folder.rglob("*")
+                       if p.suffix in {".framework", ".xctest", ".appex"} and p.is_dir() and not p.is_symlink())
+    for bundle in sorted(bundles, key=lambda p: (-len(p.parts), str(p))):
+        entitlements = ["--entitlements", str(share_entitlements)] if bundle.suffix == ".appex" else []
+        subprocess.run(sign + entitlements + [str(bundle)], env=env, check=True, capture_output=True)
+    subprocess.run(sign + ["--entitlements", str(testing_entitlements), str(app)], env=env, check=True, capture_output=True)
+    subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], env=env, check=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", type=Path, help="Optional local validation profile")
@@ -59,16 +79,8 @@ def main():
     entitlements["com.apple.security.get-task-allow"] = True
     testing_entitlements = build / "test-host.entitlements"
     testing_entitlements.write_bytes(plistlib.dumps(entitlements))
-    sign = ["codesign", "--force", "--sign", "-"]
-    for folder in [app] + test_bundles:
-        for dylib in folder.rglob("*.dylib"):
-            subprocess.run(sign + [str(dylib)], env=env, check=True, capture_output=True)
-    for bundle in test_bundles:
-        subprocess.run(sign + [str(bundle)], env=env, check=True, capture_output=True)
-    for extension in app.rglob("*.appex"):
-        subprocess.run(sign + ["--entitlements", str(project.parent / "ShareExtension/ShareExtension.entitlements"), str(extension)], env=env, check=True, capture_output=True)
-    subprocess.run(sign + ["--entitlements", str(testing_entitlements), str(app)], env=env, check=True, capture_output=True)
-    subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], env=env, check=True)
+    sign_test_products(app, test_bundles, testing_entitlements,
+                       project.parent / "ShareExtension/ShareExtension.entitlements", env)
     run_file = max(products.glob("*.xctestrun"), key=lambda p: p.stat().st_mtime)
     result = build / ("tests-" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + ".xcresult")
     print("Running Mac Catalyst XCTest…", flush=True)
