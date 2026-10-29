@@ -30,13 +30,13 @@ struct DependencyInfoView: View {
             Group {
                 if let inventory = DependencyInventory.bundled {
                     Section {
-                        Text("このアプリで使用しているライブラリのライセンスです。").font(.caption).foregroundStyle(WriterPalette.secondary)
+                        Text("このアプリで使用しているライブラリのライセンスです。").font(.writerCaption).foregroundStyle(WriterPalette.secondary)
                     }
                     ForEach(inventory.components) { component in
                         Section {
                             VStack(alignment: .leading, spacing: 5) {
-                                HStack { Text(component.name).font(.subheadline.bold()); Spacer(); Text(component.version).font(.caption.monospaced()) }
-                                Text(component.licenses.map(\.expression).joined(separator: " / ")).font(.caption).textSelection(.enabled)
+                                HStack { Text(component.name).font(.subheadline.bold()); Spacer(); Text(component.version).font(.writerCaption.monospaced()) }
+                                Text(component.licenses.map(\.expression).joined(separator: " / ")).font(.writerCaption).textSelection(.enabled)
                             }.padding(.vertical, 3)
                             NavigationLink("ライセンス全文") { ResourceTextView(title: component.name, text: DependencyInventory.resource(component.licenseFile)) }
                                 .accessibilityIdentifier("dependency-license-" + component.name)
@@ -52,5 +52,12 @@ struct DependencyInfoView: View {
 private struct ResourceTextView: View {
     let title: String
     let text: String
-    var body: some View { ScrollView { Text(text).font(.system(.caption, design: .monospaced)).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled).padding(16) }.writerChrome().navigationTitle(title).navigationBarTitleDisplayMode(.inline) }
+    private var licenseFont: Font {
+        #if targetEnvironment(macCatalyst)
+        .writerCaption.monospaced()
+        #else
+        .system(.caption, design: .monospaced)
+        #endif
+    }
+    var body: some View { ScrollView { Text(text).font(licenseFont).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled).padding(16) }.writerChrome().navigationTitle(title).navigationBarTitleDisplayMode(.inline) }
 }

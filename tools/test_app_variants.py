@@ -4,7 +4,9 @@ from pathlib import Path
 import json
 import os
 import plistlib
+import re
 import runpy
+import struct
 import tempfile
 import unittest
 
@@ -61,6 +63,29 @@ class AppVariantTests(unittest.TestCase):
             file = root / "profile.json"; file.write_text(json.dumps(profile))
             with self.assertRaises(ValueError): variant["generate"](file, existing)
             self.assertEqual(sentinel.read_text(), "keep")
+
+    def test_mac_app_and_share_extension_preserve_identity_in_both_configurations(self):
+        text = (ROOT / "ios/cocoWriter.xcodeproj/project.pbxproj").read_text()
+        configurations = ["AA0000000000000000000003", "AA0000000000000000000004",
+                          "BA0000000000000000000001", "BA0000000000000000000002"]
+        for identifier in configurations:
+            settings = re.search(r"^\s*" + identifier + r"(?: /\*.*?\*/)? = \{.*?buildSettings = \{(.*?)\};",
+                                 text, re.MULTILINE | re.DOTALL).group(1)
+            self.assertIn("SUPPORTS_MACCATALYST = YES;", settings)
+            self.assertIn("DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;", settings)
+            self.assertIn('"TARGETED_DEVICE_FAMILY[sdk=macosx*]" = "2,6";', settings)
+            self.assertIn("MACCATALYST_DEPLOYMENT_TARGET = 17.0;", settings)
+
+    def test_mac_icon_sizes_match_asset_catalog(self):
+        folder = ROOT / "ios/cocoWriter/Assets.xcassets/AppIcon.appiconset"
+        icons = [icon for icon in json.loads((folder / "Contents.json").read_text())["images"] if icon["idiom"] == "mac"]
+        self.assertEqual({(icon["size"], icon["scale"]) for icon in icons},
+                         {(f"{size}x{size}", f"{scale}x") for size in [16, 32, 128, 256, 512] for scale in [1, 2]})
+        for icon in icons:
+            data = (folder / icon["filename"]).read_bytes()
+            self.assertEqual(data[:8], b"\x89PNG\r\n\x1a\n")
+            pixels = int(icon["size"].split("x")[0]) * int(icon["scale"].rstrip("x"))
+            self.assertEqual(struct.unpack(">II", data[16:24]), (pixels, pixels))
 
 if __name__ == "__main__":
     unittest.main()

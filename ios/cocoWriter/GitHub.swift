@@ -5,34 +5,133 @@ enum WriterError: LocalizedError {
     case message(String)
     var errorDescription: String? { if case .message(let text) = self { return text }; return nil }
 }
-enum TokenVault {
-    private static var service: String { AppConfiguration.current.keychainService }
-    static func read() throws -> String {
-        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: "personal", kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne]
+/// Keep the same service/account on every platform. The injectable client lets
+/// credential lifecycle tests run without reading or changing real credentials.
+struct TokenKeychainClient {
+    var read: (String) -> (OSStatus, Data?)
+    var update: (String, Data) -> OSStatus
+    var add: (String, Data) -> OSStatus
+    var delete: (String) -> OSStatus
+
+    private static func query(_ service: String) -> [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: "personal"]
+    }
+    static let live = TokenKeychainClient(read: { service in
+        var query = TokenKeychainClient.query(service)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
+        return (status, result as? Data)
+    }, update: { service, data in
+        SecItemUpdate(TokenKeychainClient.query(service) as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+    }, add: { service, data in
+        var attributes = TokenKeychainClient.query(service)
+        attributes[kSecValueData as String] = data
+        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        return SecItemAdd(attributes as CFDictionary, nil)
+    }, delete: { service in SecItemDelete(TokenKeychainClient.query(service) as CFDictionary) })
+}
+
+final class TokenVaultStorage {
+    private let service: String
+    private let keychain: TokenKeychainClient
+    private let lock = NSLock()
+    #if targetEnvironment(macCatalyst)
+    private let preferences: UserDefaults
+    private var sessionToken: String?
+    private var savedTokenKey: String { "writer-keychain-saved-" + service }
+    #endif
+
+    init(service: String, keychain: TokenKeychainClient = .live, preferences: UserDefaults = .standard) {
+        self.service = service; self.keychain = keychain
+        #if targetEnvironment(macCatalyst)
+        self.preferences = preferences
+        #endif
+    }
+    func read() throws -> String {
+        lock.lock(); defer { lock.unlock() }
+        #if targetEnvironment(macCatalyst)
+        if let sessionToken { return sessionToken }
+        #endif
+        let (status, data) = keychain.read(service)
         if status == errSecItemNotFound { return "" }
-        guard status == errSecSuccess, let data = result as? Data, let token = String(data: data, encoding: .utf8) else { throw WriterError.message("Keychain から認証情報を読み出せません。") }
+        guard status == errSecSuccess, let data, let token = String(data: data, encoding: .utf8) else {
+            throw error("Keychain から認証情報を読み出せません。", status: status)
+        }
         return token
     }
-    static func save(_ token: String) throws {
-        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: "personal"]
+    func save(_ token: String) throws {
+        lock.lock(); defer { lock.unlock() }
         let value = token.trimmingCharacters(in: .whitespacesAndNewlines)
         if value.isEmpty {
-            let status = SecItemDelete(query as CFDictionary)
-            guard status == errSecSuccess || status == errSecItemNotFound else { throw WriterError.message("認証情報を削除できません。") }
-            return
+            #if targetEnvironment(macCatalyst)
+            // A destination change must always forget explicitly temporary credentials,
+            // even when the signed Keychain item cannot currently be removed.
+            sessionToken = nil
+            #endif
+            let status = keychain.delete(service)
+            if status == errSecSuccess || status == errSecItemNotFound {
+                #if targetEnvironment(macCatalyst)
+                preferences.removeObject(forKey: savedTokenKey)
+                #endif
+                return
+            }
+            #if targetEnvironment(macCatalyst)
+            // This is the first Mac release. A local build that has never saved a
+            // Keychain credential can change destinations. If a signed build did
+            // save one, keep the destination locked until it can be deleted.
+            if status == errSecMissingEntitlement && !preferences.bool(forKey: savedTokenKey) { return }
+            #endif
+            throw error("認証情報を削除できません。", status: status)
         }
         let data = Data(value.utf8)
-        let status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
-        if status == errSecItemNotFound {
-            var add = query
-            add[kSecValueData as String] = data
-            add[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-            guard SecItemAdd(add as CFDictionary, nil) == errSecSuccess else { throw WriterError.message("Keychain に保存できません。") }
-        } else if status != errSecSuccess { throw WriterError.message("Keychain を更新できません。") }
+        let updateStatus = keychain.update(service, data)
+        let status = updateStatus == errSecItemNotFound ? keychain.add(service, data) : updateStatus
+        guard status == errSecSuccess else {
+            throw error(updateStatus == errSecItemNotFound ? "Keychain に保存できません。" : "Keychain を更新できません。", status: status)
+        }
+        #if targetEnvironment(macCatalyst)
+        preferences.set(true, forKey: savedTokenKey)
+        sessionToken = nil
+        #endif
     }
+    private func error(_ message: String, status: OSStatus) -> WriterError {
+        #if targetEnvironment(macCatalyst)
+        if status == errSecMissingEntitlement {
+            return WriterError.message(message + "このMac版ではKeychainを利用できません。「この起動中だけトークンを使う」を選ぶと、終了するまで利用できます。保存済みトークンがある場合は、保存したMac版から削除してください。")
+        }
+        #endif
+        return WriterError.message(message)
+    }
+    #if targetEnvironment(macCatalyst)
+    var hasSessionToken: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return sessionToken != nil
+    }
+    func useForSession(_ token: String) {
+        lock.lock(); defer { lock.unlock() }
+        let value = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        sessionToken = value.isEmpty ? nil : value
+    }
+    func clearSessionToken() {
+        lock.lock(); defer { lock.unlock() }
+        sessionToken = nil
+    }
+    #endif
 }
+
+enum TokenVault {
+    private static let storage = TokenVaultStorage(service: AppConfiguration.current.keychainService)
+    static func read() throws -> String { try storage.read() }
+    static func save(_ token: String) throws { try storage.save(token) }
+    #if targetEnvironment(macCatalyst)
+    static var hasSessionToken: Bool { storage.hasSessionToken }
+    static func useForSession(_ token: String) { storage.useForSession(token) }
+    static func clearSessionToken() { storage.clearSessionToken() }
+    #endif
+}
+
 actor GitHubPublisher {
     private let configuration: SiteConfiguration
     private let profile: BlogProfile

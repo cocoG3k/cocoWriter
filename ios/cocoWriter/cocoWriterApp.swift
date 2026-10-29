@@ -4,6 +4,22 @@ import UIKit
 // Keep the existing system colors in light mode; the dark palette matches the
 // charcoal/mint design, including readable text on filled mint controls.
 enum WriterPalette {
+    #if targetEnvironment(macCatalyst)
+    // The Mac workspace uses neutral surfaces and restrained contrast. The
+    // iPhone palette remains independent of these desktop-specific colors.
+    static let background = adaptive(light: .systemGroupedBackground, dark: 0x111111)
+    static let surface = adaptive(light: .secondarySystemGroupedBackground, dark: 0x1A1A1A)
+    static let chrome = adaptive(light: .systemBackground, dark: 0x0D0D0D)
+    static let selected = adaptive(light: .label.withAlphaComponent(0.08), dark: 0x292929)
+    static let text = adaptive(light: .label, dark: 0xECECEC)
+    static let secondary = adaptive(light: .secondaryLabel, dark: 0xA2A2A2)
+    static let placeholder = adaptive(light: .placeholderText, dark: 0x858585)
+    static let separator = adaptive(light: .separator, dark: 0x363636)
+    static let accent = adaptive(light: UIColor(white: 0.16, alpha: 1), dark: 0xE8E8E8)
+    static let onAccent = adaptive(light: .white, dark: 0x151515)
+    static let selectedText = adaptive(light: .label, dark: 0xF2F2F2)
+    static let inactiveFilter = adaptive(light: .tertiarySystemGroupedBackground, dark: 0x202020)
+    #else
     static let background = adaptive(light: .systemGroupedBackground, dark: 0x151B1A)
     static let surface = adaptive(light: .secondarySystemGroupedBackground, dark: 0x232C29)
     static let chrome = adaptive(light: .systemBackground, dark: 0x1B2321)
@@ -16,6 +32,7 @@ enum WriterPalette {
     static let onAccent = adaptive(light: .white, dark: 0x151B1A)
     static let selectedText = adaptive(light: .label, dark: 0x99C7B2)
     static let inactiveFilter = adaptive(light: .tertiarySystemGroupedBackground, dark: 0x232C29)
+    #endif
 
     private static func adaptive(light: UIColor, dark: UInt32) -> Color {
         Color(uiColor: UIColor { traits in
@@ -62,14 +79,71 @@ extension View {
     func writerBarBackground() -> some View { modifier(WriterBar()) }
 }
 
+extension Font {
+    // Supporting text remains legible on a desktop without changing iPhone typography.
+    static var writerCaption: Font {
+        #if targetEnvironment(macCatalyst)
+        .system(size: 13)
+        #else
+        .caption
+        #endif
+    }
+    static var writerCaption2: Font {
+        #if targetEnvironment(macCatalyst)
+        .system(size: 12)
+        #else
+        .caption2
+        #endif
+    }
+    static var writerCode: Font {
+        #if targetEnvironment(macCatalyst)
+        .system(size: 13, design: .monospaced)
+        #else
+        .system(.caption, design: .monospaced)
+        #endif
+    }
+    static func writerSmall(size: CGFloat, weight: Font.Weight = .regular, design: Font.Design = .default) -> Font {
+        #if targetEnvironment(macCatalyst)
+        .system(size: max(size, 12), weight: weight, design: design)
+        #else
+        .system(size: size, weight: weight, design: design)
+        #endif
+    }
+}
+
 @main @MainActor struct cocoWriterApp: App {
     @StateObject private var store = DraftStore()
     @StateObject private var notes = PrivateNoteStore()
     @StateObject private var musicLibrary = MusicLibraryStore()
+    #if targetEnvironment(macCatalyst)
+    @AppStorage("mac-appearance") private var macAppearance = "dark"
+    private var macColorScheme: ColorScheme? {
+        switch macAppearance {
+        case "light": return .light
+        case "system": return nil
+        default: return .dark
+        }
+    }
+    private var macControlTint: Color {
+        switch macAppearance {
+        case "light": return .black
+        case "system": return .primary
+        default: return .white
+        }
+    }
+    #endif
     var body: some Scene {
         WindowGroup {
             DraftListView().environmentObject(store).environmentObject(notes).environmentObject(musicLibrary)
+                #if targetEnvironment(macCatalyst)
+                .tint(macControlTint).accentColor(macControlTint)
+                .preferredColorScheme(macColorScheme)
+                #else
                 .tint(WriterPalette.accent).accentColor(WriterPalette.accent)
+                #endif
         }
+        #if targetEnvironment(macCatalyst)
+        .commands { MacWriterCommands() }
+        #endif
     }
 }

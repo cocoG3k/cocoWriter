@@ -47,6 +47,7 @@ D10000000000000000000002 /* WriterConfiguration.json in Resources */ = {isa = PB
 D10000000000000000000003 /* AppConfiguration.swift in Share Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000001; };
 D10000000000000000000004 /* WriterConfiguration.json in Share Resources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000002; };
 D10000000000000000000005 /* AppConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000005; };
+E10000000000000000000001 /* MacWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000001; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -103,6 +104,7 @@ C20000000000000000000006 /* BlogPreviewTemplate.html */ = {isa = PBXFileReferenc
 D20000000000000000000001 /* AppConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfiguration.swift; sourceTree = "<group>"; };
 D20000000000000000000002 /* WriterConfiguration.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = WriterConfiguration.json; sourceTree = "<group>"; };
 D20000000000000000000005 /* AppConfigurationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfigurationTests.swift; sourceTree = "<group>"; };
+E20000000000000000000001 /* MacWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacWorkspace.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -152,6 +154,7 @@ D20000000000000000000005 /* AppConfigurationTests.swift */ = {isa = PBXFileRefer
                 A20000000000000000000024,
 				A20000000000000000000015 /* Assets.xcassets */,
 				A20000000000000000000001 /* cocoWriterApp.swift */,
+                E20000000000000000000001 /* MacWorkspace.swift */,
 				A20000000000000000000022 /* MusicLibraryViews.swift */,
 				A20000000000000000000021 /* MusicLibrary.swift */,
 				A20000000000000000000020 /* SharedMusic.swift */,
@@ -323,6 +326,7 @@ D80000000000000000000001 /* Share Resources */ = {isa = PBXResourcesBuildPhase; 
                 C10000000000000000000002 /* BlogProfile.swift in Sources */,
                 A10000000000000000000024,
 				A10000000000000000000001 /* cocoWriterApp.swift in Sources */,
+                E10000000000000000000001 /* MacWorkspace.swift in Sources */,
 				A10000000000000000000022 /* MusicLibraryViews.swift in Sources */,
 				A10000000000000000000021 /* MusicLibrary.swift in Sources */,
 				A10000000000000000000020 /* SharedMusic.swift in Sources */,
@@ -415,7 +419,9 @@ D80000000000000000000001 /* Share Resources */ = {isa = PBXResourcesBuildPhase; 
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "cocoWriter";
-				INFOPLIST_KEY_LSRequiresIPhoneOS = YES;
+				"INFOPLIST_KEY_LSRequiresIPhoneOS[sdk=iphone*]" = YES;
+				"TARGETED_DEVICE_FAMILY[sdk=macosx*]" = "2,6";
+				MACCATALYST_DEPLOYMENT_TARGET = 17.0;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -429,9 +435,11 @@ D80000000000000000000001 /* Share Resources */ = {isa = PBXResourcesBuildPhase; 
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MACCATALYST = YES;
+				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
 		};
@@ -446,7 +454,9 @@ D80000000000000000000001 /* Share Resources */ = {isa = PBXResourcesBuildPhase; 
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "cocoWriter";
-				INFOPLIST_KEY_LSRequiresIPhoneOS = YES;
+				"INFOPLIST_KEY_LSRequiresIPhoneOS[sdk=iphone*]" = YES;
+				"TARGETED_DEVICE_FAMILY[sdk=macosx*]" = "2,6";
+				MACCATALYST_DEPLOYMENT_TARGET = 17.0;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -460,9 +470,11 @@ D80000000000000000000001 /* Share Resources */ = {isa = PBXResourcesBuildPhase; 
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MACCATALYST = YES;
+				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
 		};
@@ -478,10 +490,15 @@ D80000000000000000000001 /* Share Resources */ = {isa = PBXResourcesBuildPhase; 
 					"@loader_path/Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = org.example.cocoWriterTests;
+				SUPPORTS_MACCATALYST = YES;
+				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
+				MACCATALYST_DEPLOYMENT_TARGET = 17.0;
+				"MACOSX_DEPLOYMENT_TARGET[sdk=macosx*]" = 14.0;
+				"TARGETED_DEVICE_FAMILY[sdk=macosx*]" = "2,6";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1;
+				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/cocoWriter.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/cocoWriter";
 			};
 			name = Debug;
@@ -498,10 +515,15 @@ D80000000000000000000001 /* Share Resources */ = {isa = PBXResourcesBuildPhase; 
 					"@loader_path/Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = org.example.cocoWriterTests;
+				SUPPORTS_MACCATALYST = YES;
+				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
+				MACCATALYST_DEPLOYMENT_TARGET = 17.0;
+				"MACOSX_DEPLOYMENT_TARGET[sdk=macosx*]" = 14.0;
+				"TARGETED_DEVICE_FAMILY[sdk=macosx*]" = "2,6";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1;
+				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/cocoWriter.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/cocoWriter";
 			};
 			name = Release;
@@ -515,7 +537,10 @@ D80000000000000000000001 /* Share Resources */ = {isa = PBXResourcesBuildPhase; 
  GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = ShareExtension/Info.plist;
  PRODUCT_BUNDLE_IDENTIFIER = org.example.cocoWriter.Share;
  PRODUCT_NAME = "$(TARGET_NAME)"; SKIP_INSTALL = YES;
- SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = 1;
+ SUPPORTS_MACCATALYST = YES; DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
+ MACCATALYST_DEPLOYMENT_TARGET = 17.0;
+ "TARGETED_DEVICE_FAMILY[sdk=macosx*]" = "2,6";
+ SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2";
  LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
  }; name = Debug; };
 
@@ -527,7 +552,10 @@ D80000000000000000000001 /* Share Resources */ = {isa = PBXResourcesBuildPhase; 
  GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = ShareExtension/Info.plist;
  PRODUCT_BUNDLE_IDENTIFIER = org.example.cocoWriter.Share;
  PRODUCT_NAME = "$(TARGET_NAME)"; SKIP_INSTALL = YES;
- SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = 1;
+ SUPPORTS_MACCATALYST = YES; DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
+ MACCATALYST_DEPLOYMENT_TARGET = 17.0;
+ "TARGETED_DEVICE_FAMILY[sdk=macosx*]" = "2,6";
+ SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2";
  LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
  }; name = Release; };
 /* End XCBuildConfiguration section */

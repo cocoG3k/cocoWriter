@@ -13,7 +13,7 @@ import SwiftUI
     var body: some View {
         NavigationStack {
             List {
-                if let error = library.storageError ?? drafts.storageError { Text(error).font(.caption).foregroundStyle(.red) }
+                if let error = library.storageError ?? drafts.storageError { Text(error).font(.writerCaption).foregroundStyle(.red) }
                 Section {
                     Button { picking = true } label: { Label("ストックから曲紹介を書く", systemImage: "square.and.pencil") }
                         .disabled(library.items.isEmpty || !drafts.loaded || drafts.storageError != nil || drafts.categorySettingsError != nil)
@@ -57,7 +57,7 @@ import SwiftUI
             Form {
                 if let error = library.storageError { Section { Text(error).foregroundStyle(.red); Button("再保存") { library.update(item) } } }
                 Section { MusicItemEditor(item: $item) { deleting = true } }
-                Section { Text("書きかけのまま保存できます。Spotifyの確認は記事を公開するまでに行ってください。").font(.caption).foregroundStyle(WriterPalette.secondary) }
+                Section { Text("書きかけのまま保存できます。Spotifyの確認は記事を公開するまでに行ってください。").font(.writerCaption).foregroundStyle(WriterPalette.secondary) }
             }.writerCanvas().writerChrome().navigationTitle("曲をストックに保存").navigationBarTitleDisplayMode(.inline)
                 .toolbar { Button("完了") { if library.update(item) { dismiss() } } }
                 .onChange(of: item) { _, value in library.update(value) }
@@ -89,7 +89,13 @@ import SwiftUI
                         HStack {
                             MusicLibraryRow(item: item)
                             Spacer()
-                            if used.contains(item.id) { Text("追加済み").font(.caption) }
+                            if used.contains(item.id) {
+                                #if targetEnvironment(macCatalyst)
+                                Text("追加済み").font(.writerCaption).fixedSize()
+                                #else
+                                Text("追加済み").font(.writerCaption)
+                                #endif
+                            }
                             else { Image(systemName: selected.contains(item.id) ? "checkmark.circle.fill" : "circle") }
                         }.contentShape(Rectangle())
                     }.buttonStyle(.plain).disabled(used.contains(item.id))
@@ -116,9 +122,9 @@ private struct MusicLibraryRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(item.title.isEmpty ? "曲名は未入力" : item.title).font(.headline)
-            if !item.artist.isEmpty { Text(item.artist).font(.caption).foregroundStyle(WriterPalette.secondary) }
-            if !item.comment.isEmpty { Text(item.comment).font(.caption).lineLimit(2).foregroundStyle(WriterPalette.secondary) }
-            if item.title.isEmpty, !item.youtubeURL.isEmpty { Text(item.youtubeURL).font(.caption2).lineLimit(1).foregroundStyle(WriterPalette.secondary) }
+            if !item.artist.isEmpty { Text(item.artist).font(.writerCaption).foregroundStyle(WriterPalette.secondary) }
+            if !item.comment.isEmpty { Text(item.comment).font(.writerCaption).lineLimit(2).foregroundStyle(WriterPalette.secondary) }
+            if item.title.isEmpty, !item.youtubeURL.isEmpty { Text(item.youtubeURL).font(.writerCaption2).lineLimit(1).foregroundStyle(WriterPalette.secondary) }
         }.padding(.vertical, 4)
     }
 }

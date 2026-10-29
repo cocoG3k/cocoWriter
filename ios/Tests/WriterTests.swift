@@ -1,8 +1,89 @@
 import XCTest
 import Combine
+import Security
 @testable import cocoWriter
 
 final class WriterTests: XCTestCase {
+    func testTokenPersistenceUsesConfiguredIdentityWithoutRealKeychainAccess() throws {
+        let expectedService = "WriterTests.Credentials." + UUID().uuidString
+        var stored: Data?
+        var writes = 0
+        let client = TokenKeychainClient(read: { service in
+            XCTAssertEqual(service, expectedService)
+            return stored.map { (errSecSuccess, $0) } ?? (errSecItemNotFound, nil)
+        }, update: { service, data in
+            XCTAssertEqual(service, expectedService)
+            guard stored != nil else { return errSecItemNotFound }
+            stored = data; writes += 1; return errSecSuccess
+        }, add: { service, data in
+            XCTAssertEqual(service, expectedService)
+            stored = data; writes += 1; return errSecSuccess
+        }, delete: { service in
+            XCTAssertEqual(service, expectedService)
+            stored = nil; return errSecSuccess
+        })
+        let suite = UUID().uuidString, defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let vault = TokenVaultStorage(service: expectedService, keychain: client, preferences: defaults)
+        XCTAssertEqual(try vault.read(), "")
+        try vault.save("  fixture-credential\n")
+        XCTAssertEqual(try vault.read(), "fixture-credential")
+        try vault.save("updated-fixture")
+        XCTAssertEqual(try vault.read(), "updated-fixture")
+        XCTAssertEqual(writes, 2)
+        try vault.save("")
+        XCTAssertEqual(try vault.read(), "")
+    }
+    #if targetEnvironment(macCatalyst)
+    func testMacSessionCredentialsAreExplicitTemporaryAndNeverPersisted() throws {
+        var keychainCalls = 0
+        let unavailable = TokenKeychainClient(read: { _ in keychainCalls += 1; return (errSecItemNotFound, nil) },
+                                              update: { _, _ in keychainCalls += 1; return errSecMissingEntitlement },
+                                              add: { _, _ in keychainCalls += 1; return errSecMissingEntitlement },
+                                              delete: { _ in keychainCalls += 1; return errSecMissingEntitlement })
+        let suite = UUID().uuidString, defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let vault = TokenVaultStorage(service: "SessionTests", keychain: unavailable, preferences: defaults)
+        vault.useForSession("  fixture-session\n")
+        XCTAssertTrue(vault.hasSessionToken)
+        XCTAssertEqual(try vault.read(), "fixture-session")
+        XCTAssertEqual(keychainCalls, 0, "An explicit session token must not touch Keychain")
+        let relaunched = TokenVaultStorage(service: "SessionTests", keychain: unavailable, preferences: defaults)
+        XCTAssertFalse(relaunched.hasSessionToken)
+        XCTAssertEqual(try relaunched.read(), "")
+        XCTAssertThrowsError(try vault.save("persistent-fixture"))
+        XCTAssertTrue(vault.hasSessionToken, "A failed persistent save must keep the explicitly selected session")
+        XCTAssertEqual(try vault.read(), "fixture-session")
+        vault.clearSessionToken()
+        XCTAssertFalse(vault.hasSessionToken)
+        XCTAssertEqual(try vault.read(), "")
+        vault.useForSession("another-fixture")
+        XCTAssertNoThrow(try vault.save(""), "A first local Mac build has never stored a persistent credential")
+        XCTAssertFalse(vault.hasSessionToken, "Destination changes must forget the old session")
+        XCTAssertTrue(defaults.dictionaryRepresentation().values.allSatisfy { ($0 as? String)?.contains("fixture-session") != true })
+    }
+    func testMacSignedCredentialCannotBeForgottenByAnUnentitledBuild() throws {
+        var deletionAllowed = false
+        let client = TokenKeychainClient(read: { _ in (errSecSuccess, Data("signed-fixture".utf8)) },
+                                        update: { _, _ in errSecSuccess }, add: { _, _ in errSecSuccess },
+                                        delete: { _ in deletionAllowed ? errSecSuccess : errSecMissingEntitlement })
+        let suite = UUID().uuidString, defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let signed = TokenVaultStorage(service: "SignedSessionTests", keychain: client, preferences: defaults)
+        signed.useForSession("temporary-fixture")
+        try signed.save("signed-fixture")
+        XCTAssertFalse(signed.hasSessionToken, "Successful Keychain saving ends temporary use")
+        let local = TokenVaultStorage(service: "SignedSessionTests", keychain: client, preferences: defaults)
+        local.useForSession("local-fixture")
+        XCTAssertThrowsError(try local.save(""), "Destination changes must stop if a previously signed credential cannot be deleted")
+        XCTAssertFalse(local.hasSessionToken)
+        XCTAssertThrowsError(try local.save(""), "Failed deletion must preserve the saved-credential marker")
+        deletionAllowed = true
+        try local.save("")
+        deletionAllowed = false
+        XCTAssertNoThrow(try local.save(""), "Successful deletion removes the marker")
+    }
+    #endif
     let spotify = "https://open.spotify.com/track/0123456789ABCDEFGHIJKL?si=ignored"
     @MainActor func testRemoteDeletionPublishesOnlyTheCompleteShelfChange() throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

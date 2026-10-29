@@ -129,9 +129,38 @@ struct MarkdownEditor: View {
     var onAddPhoto: (() -> Void)?
     var onAddImageFile: (() -> Void)?
     @StateObject private var control = MarkdownEditorControl()
+    private var editorCornerRadius: CGFloat {
+        #if targetEnvironment(macCatalyst)
+        6
+        #else
+        12
+        #endif
+    }
+    private var editorBorderOpacity: Double {
+        #if targetEnvironment(macCatalyst)
+        0.6
+        #else
+        0.35
+        #endif
+    }
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 4) {
+            #if targetEnvironment(macCatalyst)
+            ScrollView(.horizontal, showsIndicators: false) {
+                formattingToolbar.fixedSize(horizontal: true, vertical: false)
+            }.frame(maxWidth: .infinity, alignment: .leading).background(WriterPalette.surface)
+            #else
+            formattingToolbar
+            #endif
+            Divider()
+            MarkdownTextView(text: $text, control: control, identifier: identifier)
+                .frame(minHeight: minHeight)
+                .background(WriterPalette.surface)
+        }.buttonStyle(.borderless).clipShape(RoundedRectangle(cornerRadius: editorCornerRadius))
+            .overlay(RoundedRectangle(cornerRadius: editorCornerRadius).stroke(WriterPalette.separator.opacity(editorBorderOpacity)))
+    }
+    private var formattingToolbar: some View {
+        HStack(spacing: 4) {
                 Menu {
                     Button("大見出し · H1") { control.apply(.heading(1)) }
                     Button("見出し · H2") { control.apply(.heading(2)) }
@@ -168,15 +197,11 @@ struct MarkdownEditor: View {
                         .accessibilityLabel("画像を追加").accessibilityIdentifier(identifier + "-image")
                 }
                 Spacer(minLength: 0)
+                #if !targetEnvironment(macCatalyst)
                 Button { control.dismissKeyboard() } label: { Image(systemName: "keyboard.chevron.compact.down").frame(width: 34, height: 40) }
                     .accessibilityLabel("キーボードを閉じる")
+                #endif
             }.foregroundStyle(Color.accentColor).padding(.horizontal, 4).background(WriterPalette.surface)
-            Divider()
-            MarkdownTextView(text: $text, control: control, identifier: identifier)
-                .frame(minHeight: minHeight)
-                .background(WriterPalette.surface)
-        }.buttonStyle(.borderless).clipShape(RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(WriterPalette.separator.opacity(0.35)))
     }
     private func tool(_ title: String, label: String, action: MarkdownAction, font: Font) -> some View {
         Button { control.apply(action) } label: { Text(title).font(font).frame(width: 34, height: 40) }
@@ -193,12 +218,26 @@ private struct MarkdownTextView: UIViewRepresentable {
     let control: MarkdownEditorControl
     let identifier: String
     func makeUIView(context: Context) -> UITextView {
-        let view = UITextView()
+        let view = WriterTextView()
+        view.editorControl = control
+        #if targetEnvironment(macCatalyst)
+        view.font = .monospacedSystemFont(ofSize: 15, weight: .regular)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = 6
+        view.typingAttributes[.paragraphStyle] = paragraph
+        #else
         view.font = .preferredFont(forTextStyle: .body)
+        #endif
         view.adjustsFontForContentSizeCategory = true
         view.backgroundColor = .clear
         view.textColor = UIColor(WriterPalette.text)
+        #if targetEnvironment(macCatalyst)
+        // Align the body text with the title while retaining breathing room at the rounded edge.
+        view.textContainerInset = UIEdgeInsets(top: 16, left: 12, bottom: 20, right: 12)
+        view.textContainer.lineFragmentPadding = 0
+        #else
         view.textContainerInset = UIEdgeInsets(top: 16, left: 10, bottom: 20, right: 10)
+        #endif
         view.autocorrectionType = .no
         view.smartQuotesType = .no
         view.smartDashesType = .no
@@ -221,4 +260,22 @@ private struct MarkdownTextView: UIViewRepresentable {
         init(parent: MarkdownTextView) { self.parent = parent }
         func textViewDidChange(_ view: UITextView) { parent.text = view.text ?? "" }
     }
+}
+
+private final class WriterTextView: UITextView {
+    weak var editorControl: MarkdownEditorControl?
+    #if targetEnvironment(macCatalyst)
+    override var keyCommands: [UIKeyCommand]? {
+        let commands = [
+            UIKeyCommand(title: "太字", action: #selector(markdownBold), input: "b", modifierFlags: .command),
+            UIKeyCommand(title: "斜体", action: #selector(markdownItalic), input: "i", modifierFlags: .command),
+            UIKeyCommand(title: "リンク", action: #selector(markdownLink), input: "k", modifierFlags: .command)
+        ]
+        commands.forEach { $0.wantsPriorityOverSystemBehavior = true }
+        return (super.keyCommands ?? []) + commands
+    }
+    @objc private func markdownBold() { guard markedTextRange == nil else { return }; editorControl?.apply(.bold) }
+    @objc private func markdownItalic() { guard markedTextRange == nil else { return }; editorControl?.apply(.italic) }
+    @objc private func markdownLink() { guard markedTextRange == nil else { return }; editorControl?.apply(.link) }
+    #endif
 }

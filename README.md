@@ -4,7 +4,7 @@
 
 <h1 align="center">cocoWriter</h1>
 
-<p align="center"><strong>日々の記録を、iPhoneから自分のGitHub Pagesへ。</strong></p>
+<p align="center"><strong>日々の記録を、iPhoneとMacから自分のGitHub Pagesへ。</strong></p>
 <p align="center">Markdownで書いて、サイトの見た目で確かめて、写真と一緒に公開する。<br>自分のブログのための、オープンソースの執筆アプリです。</p>
 
 <p align="center">
@@ -59,6 +59,44 @@
 保存項目`youtubeURL`は旧データとの互換性のため維持し、対応する全サービスの共有元URLを格納します。下書き・ストック・共有受信データの形式と、アプリ識別子・App Group・保存先・Keychain設定は変更しません。
 
 
+### Macで使う
+
+macOS 14以降に対応しています。Mac版はダーク表示を初期設定とし、「設定」→「外観」でライト表示やシステム設定への追従も選べます。Macのテストは `python3 tools/test-mac.py` で専用の検証用アプリを使って実行できます。左のサイドバーから記事・アルバム・曲のストック・自分のメモ・設定を開けます。記事一覧の検索、広いMarkdown本文欄、記事情報パネル、本文と並べるプレビューを備えています。小さなウィンドウでは、パネルを開いている間は記事一覧を畳み、執筆スペースを確保します。
+
+XcodeをインストールしたMacで、リポジトリ直下の `build-mac.command` を実行してください。
+
+```sh
+./build-mac.command --open
+# 設定済みのアプリを使う場合
+./build-mac.command --profile .local/my-blog/profile.json --output .local/my-blog/mac/cocoWriter.app --open
+```
+
+既定の出力は `.local/mac/cocoWriter.app` です。このMacで動かすためのローカル署名で作成します。別のMacへの配布に必要なDeveloper ID署名・公証や、Mac App Store向けの配布は含みません。Xcodeからは `cocoWriter` Schemeと **My Mac (Mac Catalyst)** を選んでもビルドできます。
+
+#### Mac版とiPhone版のビルド先
+
+どちらも `ios/` の共通ソースと `cocoWriter` Schemeを使い、ビルド先で分かれます。Mac向けの画面などは `#if targetEnvironment(macCatalyst)` で切り替えます。
+
+| 作るもの | Xcodeのビルド先 | コマンドと成果物 |
+| --- | --- | --- |
+| Mac版 | My Mac (Mac Catalyst) | `./build-mac.command` → `.local/mac/cocoWriter.app`（ローカル署名） |
+| iPhone版 | iPhoneまたはiOS Simulator | `./build-altstore-ipa.command` → `altstore/cocoWriter.ipa`（AltStoreで実機用に署名） |
+
+Mac用スクリプトはMac Catalystを、IPA用スクリプトはiOS実機向けを指定します。片方をビルドしても、もう片方の端末にインストールされることはありません。既存アプリの更新には、そのアプリの設定と署名・インストール方法を維持してください。
+
+ローカル署名版ではKeychainへのトークン保存が利用できません。設定の「この起動中だけトークンを使う」でGitHub認証を利用できます。トークンはメモリ内だけに保持し、アプリ終了後は再入力が必要です。Keychainへ永続保存するMac版には、対応する署名とプロビジョニングプロファイルが必要です。
+
+| 操作 | ショートカット |
+| --- | --- |
+| 新しい記事（記事画面） | ⌘N |
+| 保存（編集内容は自動保存） | ⌘S |
+| 本文とプレビューを並べる | ⇧⌘P |
+| Markdownを書き出す | ⇧⌘E |
+| 設定 | ⌘, |
+| 本文の太字・斜体・リンク | ⌘B・⌘I・⌘K |
+
+記事・メモ・写真・曲ストック・トークンは各端末に保存します。iPhoneとMacの自動同期はありません。投稿済みの記事はGitHubから読み込めますが、未公開の下書きや自分のメモは自動転送されません。既存版の更新では、同じアプリ設定を使って識別子・保存フォルダ・Keychainサービスを保ちます。Mac版の作成はiPhoneへのインストールを行いません。
+
 ### 自分のGitHub Pagesに合わせて
 
 ユーザーサイト、プロジェクトサイト、独自ドメインに対応。公開先のリポジトリ・ブランチ・URLはアプリの設定画面から選べます。
@@ -70,7 +108,7 @@
 | Hugo | `content/posts/` | [YAML](config/hugo-yaml.json) · [TOML](config/hugo-toml.json) · [JSON](config/hugo-json.json) |
 | 既存サイトのテーマ付きプレビュー | サイトに合わせて指定 | [sfuji.orgでの検証](docs/SFUJI_VALIDATION.md) |
 
-アプリはiOSネイティブで、GitHub Pagesに公開するのはブログです。既存サイトには、設定画面で[対応する記事形式](docs/content-format.md)と保存先を合わせます。
+アプリはiOSとMac Catalystに対応し、GitHub Pagesに公開するのはブログです。既存サイトには、設定画面で[対応する記事形式](docs/content-format.md)と保存先を合わせます。
 
 **必要なもの：Mac、Swift 6.2以降を含むXcode、iOS 17以降。** ソースからビルドして使います。App Storeでの配信はありません。同梱のブログテンプレートにはNode.js 22以降を使います。
 

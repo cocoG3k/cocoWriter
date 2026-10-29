@@ -4,13 +4,13 @@
 
 <h1 align="center">cocoWriter</h1>
 
-<p align="center"><strong>Your words, your own GitHub Pages.</strong><br>A native iPhone Markdown writer for your personal blog.</p>
+<p align="center"><strong>Your words, your own GitHub Pages.</strong><br>A native iPhone and Mac Markdown writer for your personal blog.</p>
 
 ![Your words, your own space.](images/hero.svg)
 
 <p align="center"><a href="../README.md">日本語</a> · <a href="content-format.md">Configuration guide</a></p>
 
-cocoWriter is a native iPhone app for writing Markdown articles, adding photos, collecting music links, and publishing to your own GitHub Pages blog. It is an independent version of CocoG Writer. It uses a separate bundle identifier and local storage, and shares the original CocoG Writer icon.
+cocoWriter is a native iPhone and Mac Catalyst app for writing Markdown articles, adding photos, collecting music links, and publishing to your own GitHub Pages blog. It is an independent version of CocoG Writer. It uses a separate bundle identifier and local storage, and shares the original CocoG Writer icon.
 
 ## Write, preview, publish
 
@@ -19,6 +19,34 @@ cocoWriter is a native iPhone app for writing Markdown articles, adding photos, 
 | <img src="images/articles.png" width="240" alt="Sample articles in the draft library"> | <img src="images/editor.png" width="240" alt="Article details and Markdown editor"> | <img src="images/preview.png" width="240" alt="An article preview using the blog theme"> |
 
 <sub>iPhone Simulator screenshots with sample content. The articles have not been published.</sub>
+
+## Use on Mac
+
+Requires macOS 14 or newer and Xcode with Swift 6.2 or newer. Run
+`./build-mac.command --open` at the repository root to create and open
+`.local/mac/cocoWriter.app`. To keep an existing app variant, pass
+`--profile .local/my-blog/profile.json --output .local/my-blog/mac/cocoWriter.app`.
+You can also build the `cocoWriter` scheme for **My Mac (Mac Catalyst)** in Xcode.
+The script signs locally without an Apple account; distribution to other Macs
+needs Developer ID signing and notarization or a Mac App Store configuration.
+
+Both platforms use the shared `ios/` source and the `cocoWriter` scheme. Choose
+**My Mac (Mac Catalyst)** for the Mac app, or an iPhone or iOS Simulator for
+iOS. Mac-specific views use `#if targetEnvironment(macCatalyst)`. The Mac
+script produces a locally signed `.app`; `./build-altstore-ipa.command` builds
+an iOS device IPA for AltStore to sign. Building either does not install the
+other. Preserve an existing app's configuration and signing/install workflow when
+updating it.
+
+The Mac workspace defaults to a neutral dark appearance; Settings lets you choose light or follow the system.
+
+The Mac workspace includes a sidebar, article search, a spacious Markdown editor,
+an article inspector and a preview beside the text. Narrow windows temporarily
+hide the article list when a detail panel is open. Use ⌘N for a new article in
+the article workspace, ⌘S to save, ⇧⌘P for preview, ⇧⌘E to export, and ⌘, for
+settings. The body editor supports ⌘B, ⌘I and ⌘K for Markdown formatting.
+Edits also save automatically. Each device keeps its own drafts, private notes,
+images and credentials; there is no automatic iPhone/Mac synchronization.
 
 ## Get started
 
@@ -43,3 +71,9 @@ Changing the publishing destination clears its token and is blocked while connec
 For development, run `python3 tools/check-project.py`, `python3 tools/test-ios.py`, and `npm ci && npm test && npm run build` in `site-template/`. See [validation](VALIDATION.md), [content format](content-format.md), [contributing](../CONTRIBUTING.md), and [third-party notices](../THIRD_PARTY_NOTICES.md).
 
 The project's own code and assets are MIT licensed. Dependencies retain their upstream licenses. Authors retain the rights to their own blog articles and photos.
+
+Local ad-hoc Mac builds cannot persist GitHub tokens in the Data Protection
+Keychain. Settings offers **Use token for this session only** (Japanese UI:
+「この起動中だけトークンを使う」). The token stays in memory and must be re-entered
+after quitting. Keychain persistence requires a suitably signed and provisioned
+Mac Catalyst app. Tokens are never saved to a plain-text file.

@@ -263,30 +263,22 @@ struct ArticlePhotoPicker: UIViewControllerRepresentable {
                         } placeholder: { Label("公開済みの写真", systemImage: "photo") }
                     }
                     SwiftUI.Text(image.byteCount > 0 ? "JPEG · \(image.width)×\(image.height) · \(ByteCountFormatter.string(fromByteCount: Int64(image.byteCount), countStyle: .file))" : "公開済みのJPEG · 容量は取得時に確認")
-                        .font(.caption).foregroundStyle(WriterPalette.secondary)
-                    HStack {
-                        Button("本文の末尾に挿入") { draft.body += "\n\n" + image.markdown + "\n" }
-                        Spacer()
-                        Button("取り外す", role: .destructive) {
-                            draft.body = draft.body.replacingOccurrences(of: image.markdown, with: "")
-                            // Preserve custom alt text by removing any Markdown node for this exact image.
-                            draft.body = ArticleImageReferences.removing(image.publicPath, from: draft.body)
-                            for index in draft.music.indices {
-                                draft.music[index].comment = ArticleImageReferences.removing(image.publicPath, from: draft.music[index].comment)
-                            }
-                            if draft.markdown.contains(image.publicPath) {
-                                message = "本文にこの画像への参照が残っています。本文から参照を削除してから取り外してください。"
-                            } else { draft.images?.removeAll { $0.id == image.id } }
-                        }
-                    }.font(.caption).buttonStyle(.borderless)
+                        .font(.writerCaption).foregroundStyle(WriterPalette.secondary)
+                    imageActions(image)
                 }
             }
             Button { photos = true } label: { Label("写真から追加", systemImage: "photo.on.rectangle") }
                 .accessibilityIdentifier("article-add-photo")
-            Button { files = true } label: { Label("画像ファイルから追加", systemImage: "folder") }
+            Button { files = true } label: {
+                #if targetEnvironment(macCatalyst)
+                Label("画像ファイルから追加", systemImage: "folder").fixedSize(horizontal: false, vertical: true)
+                #else
+                Label("画像ファイルから追加", systemImage: "folder")
+                #endif
+            }
                 .accessibilityIdentifier("article-add-image-file")
             if !draft.referencedImages.isEmpty {
-                Button("写真を端末に保存してオフラインで使う") {
+                Button {
                     importing = true
                     Task {
                         store.beginRemoteOperation()
@@ -296,7 +288,14 @@ struct ArticlePhotoPicker: UIViewControllerRepresentable {
                             message = "写真の端末コピーを保存しました。"
                         } catch { message = error.localizedDescription }
                     }
-                }.font(.caption)
+                } label: {
+                    #if targetEnvironment(macCatalyst)
+                    SwiftUI.Text("写真を端末に保存してオフラインで使う").fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    #else
+                    SwiftUI.Text("写真を端末に保存してオフラインで使う")
+                    #endif
+                }.font(.writerCaption)
             }
             if importing { ProgressView("公開用の写真を作成中…") }
         } header: { SwiftUI.Text("写真") } footer: {
@@ -304,7 +303,46 @@ struct ArticlePhotoPicker: UIViewControllerRepresentable {
         }
         .disabled(importing || draft.hasPendingOperation)
     }
-
+    @ViewBuilder private func imageActions(_ image: ArticleImage) -> some View {
+        #if targetEnvironment(macCatalyst)
+        ViewThatFits(in: .horizontal) {
+            HStack { insertButton(image); Spacer(minLength: 12); removeButton(image) }
+                .fixedSize(horizontal: true, vertical: false)
+            VStack(alignment: .leading, spacing: 8) { insertButton(image); removeButton(image) }
+        }.font(.writerCaption).buttonStyle(.borderless)
+        #else
+        HStack { insertButton(image); Spacer(); removeButton(image) }
+            .font(.writerCaption).buttonStyle(.borderless)
+        #endif
+    }
+    private func insertButton(_ image: ArticleImage) -> some View {
+        Button { draft.body += "\n\n" + image.markdown + "\n" } label: {
+            #if targetEnvironment(macCatalyst)
+            SwiftUI.Text("本文の末尾に挿入").fixedSize(horizontal: false, vertical: true)
+            #else
+            SwiftUI.Text("本文の末尾に挿入")
+            #endif
+        }
+    }
+    private func removeButton(_ image: ArticleImage) -> some View {
+        Button(role: .destructive) {
+            draft.body = draft.body.replacingOccurrences(of: image.markdown, with: "")
+            // Preserve custom alt text by removing any Markdown node for this exact image.
+            draft.body = ArticleImageReferences.removing(image.publicPath, from: draft.body)
+            for index in draft.music.indices {
+                draft.music[index].comment = ArticleImageReferences.removing(image.publicPath, from: draft.music[index].comment)
+            }
+            if draft.markdown.contains(image.publicPath) {
+                message = "本文にこの画像への参照が残っています。本文から参照を削除してから取り外してください。"
+            } else { draft.images?.removeAll { $0.id == image.id } }
+        } label: {
+            #if targetEnvironment(macCatalyst)
+            SwiftUI.Text("取り外す").fixedSize(horizontal: false, vertical: true)
+            #else
+            SwiftUI.Text("取り外す")
+            #endif
+        }
+    }
 }
 
 struct ArticleBundle: FileDocument {
@@ -439,7 +477,7 @@ enum ArticleAlbum {
                     SwiftUI.Text("すべて").tag(Optional<ArticleShelf>.none)
                     ForEach(ArticleShelf.allCases) { shelf in SwiftUI.Text(shelf.label).tag(Optional(shelf)) }
                 }.pickerStyle(.segmented).padding(.horizontal, 16).padding(.vertical, 8).accessibilityIdentifier("album-shelf")
-                if let error = store.storageError { SwiftUI.Text(error).font(.caption).foregroundStyle(.red).padding(.horizontal, 16) }
+                if let error = store.storageError { SwiftUI.Text(error).font(.writerCaption).foregroundStyle(.red).padding(.horizontal, 16) }
                 ScrollView {
                     if photos.isEmpty {
                         ContentUnavailableView(query.isEmpty ? "記事の写真はまだありません" : "画像が見つかりません",
@@ -455,18 +493,37 @@ enum ArticleAlbum {
                                             .overlay { ArticleAlbumImage(photo: photo, files: store.imageFiles, dimension: 400, contentMode: .fill) }
                                             .clipped().clipShape(RoundedRectangle(cornerRadius: 10))
                                         if let use = photo.uses.first {
-                                            SwiftUI.Text(verbatim: use.title).font(.caption).foregroundStyle(WriterPalette.text).lineLimit(1)
+                                            #if targetEnvironment(macCatalyst)
+                                            SwiftUI.Text(verbatim: use.title).font(.writerCaption).foregroundStyle(WriterPalette.text)
+                                                .fixedSize(horizontal: false, vertical: true)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                            #else
+                                            SwiftUI.Text(verbatim: use.title).font(.writerCaption).foregroundStyle(WriterPalette.text).lineLimit(1)
+                                            #endif
+                                            #if targetEnvironment(macCatalyst)
+                                            ViewThatFits(in: .horizontal) {
+                                                HStack(spacing: 4) {
+                                                    SwiftUI.Text(use.date, format: .dateTime.year().month().day())
+                                                    if photo.uses.count > 1 { SwiftUI.Text("· \(photo.uses.count)記事") }
+                                                }.fixedSize(horizontal: true, vertical: false)
+                                                VStack(alignment: .leading, spacing: 2) {
+                                                    SwiftUI.Text(use.date, format: .dateTime.year().month().day())
+                                                    if photo.uses.count > 1 { SwiftUI.Text("\(photo.uses.count)記事") }
+                                                }
+                                            }.font(.writerCaption2).foregroundStyle(WriterPalette.secondary)
+                                            #else
                                             HStack(spacing: 4) {
                                                 SwiftUI.Text(use.date, format: .dateTime.year().month().day())
                                                 if photo.uses.count > 1 { SwiftUI.Text("· \(photo.uses.count)記事") }
-                                            }.font(.caption2).foregroundStyle(WriterPalette.secondary).lineLimit(1)
+                                            }.font(.writerCaption2).foregroundStyle(WriterPalette.secondary).lineLimit(1)
+                                            #endif
                                         }
                                     }.contentShape(Rectangle())
                                 }.buttonStyle(.plain).accessibilityLabel((photo.uses.first?.caption ?? "写真") + " · " + (photo.uses.first?.title ?? ""))
                                     .accessibilityIdentifier("album-photo-" + photo.id)
                             }
                         }.padding(16)
-                        SwiftUI.Text("\(photos.count)枚 · 記事に挿入した画像").font(.caption).foregroundStyle(WriterPalette.secondary).padding(.bottom, 16)
+                        SwiftUI.Text("\(photos.count)枚 · 記事に挿入した画像").font(.writerCaption).foregroundStyle(WriterPalette.secondary).padding(.bottom, 16)
                     }
                 }
             }.background(WriterPalette.background).writerChrome().navigationTitle("アルバム").navigationBarTitleDisplayMode(.inline)
@@ -512,10 +569,10 @@ enum ArticleAlbum {
                                         HStack {
                                             SwiftUI.Text(use.date, format: .dateTime.year().month().day())
                                             SwiftUI.Text(use.isPublished ? "投稿済み" : "下書き")
-                                        }.font(.caption).foregroundStyle(WriterPalette.secondary)
+                                        }.font(.writerCaption).foregroundStyle(WriterPalette.secondary)
                                     }
                                     Spacer()
-                                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(WriterPalette.secondary)
+                                    Image(systemName: "chevron.right").font(.writerCaption).foregroundStyle(WriterPalette.secondary)
                                 }.padding(12).background(WriterPalette.surface, in: RoundedRectangle(cornerRadius: 10))
                             }.buttonStyle(.plain).accessibilityIdentifier("album-open-article-" + use.articleID.uuidString)
                         }
@@ -575,7 +632,7 @@ private struct ArticleAlbumImage: View {
     private var unavailable: some View {
         VStack(spacing: 6) {
             SwiftUI.Image(systemName: "photo").font(.title2)
-            SwiftUI.Text("画像を読み込めません").font(.caption2)
+            SwiftUI.Text("画像を読み込めません").font(.writerCaption2)
         }.foregroundStyle(WriterPalette.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

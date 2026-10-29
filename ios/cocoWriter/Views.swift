@@ -9,12 +9,43 @@ struct MarkdownFile: FileDocument {
     init(configuration: ReadConfiguration) throws { text = String(data: configuration.file.regularFileContents ?? Data(), encoding: .utf8) ?? "" }
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: Data(text.utf8)) }
 }
+
+// Use one presentation for both export formats. Multiple exporters attached to
+// the editor can suppress the save panel on Mac Catalyst.
+enum ArticleExportDocument: FileDocument {
+    case markdown(MarkdownFile), bundle(ArticleBundle)
+    static var readableContentTypes: [UTType] { [MarkdownFile.markdownType, .folder] }
+    init(configuration: ReadConfiguration) throws {
+        guard configuration.file.isRegularFile else { throw WriterError.message("記事フォルダの読み込みには対応していません。") }
+        self = .markdown(try MarkdownFile(configuration: configuration))
+    }
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        switch self {
+        case .markdown(let file): return try file.fileWrapper(configuration: configuration)
+        case .bundle(let file): return try file.fileWrapper(configuration: configuration)
+        }
+    }
+}
 @MainActor struct EditorView: View {
     @EnvironmentObject private var store: DraftStore
     @EnvironmentObject private var musicLibrary: MusicLibraryStore
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.colorScheme) private var colorScheme
     @State var draft: Draft
+    var embedded = false
+    var onBusyChange: ((Bool) -> Void)? = nil
+    var onClose: (() -> Void)? = nil
+    var onPanelChange: ((Bool) -> Void)? = nil
+    #if targetEnvironment(macCatalyst)
+    @Environment(\.writerInteractionChanged) private var interactionChanged
+    @State private var interactionID = UUID()
+    #endif
+    @State private var macPreview = false
+    @State private var macInspector = false
+    @State private var macPreviewLoading = true
+    @State private var macPreviewError: String?
+    @State private var macPreviewDraft: Draft?
     @State private var editingHeader: ArticleFixedField?
     @State private var choosingMusic = false
     @State private var preview = false
@@ -32,139 +63,63 @@ struct MarkdownFile: FileDocument {
     @State private var showReloadConfirmation = false
     @State private var message: String?
     private var publisher: GitHubPublisher { GitHubPublisher(configuration: store.site, profile: draft.publicationProfile) }
+    private var publishTint: Color {
+        #if targetEnvironment(macCatalyst)
+        colorScheme == .dark ? .white : .black
+        #else
+        WriterPalette.accent
+        #endif
+    }
+    private var publishForeground: Color {
+        #if targetEnvironment(macCatalyst)
+        colorScheme == .dark ? .black : .white
+        #else
+        WriterPalette.onAccent
+        #endif
+    }
     private var publishDisabled: Bool {
         publishing || importingImage || draft.pendingDeletionSHA != nil || store.storageError != nil || (draft.pendingMarkdown == nil && draft.validation != nil)
     }
     var body: some View {
-        Form {
-            Group {
-                if let error = store.storageError { Section { Text(error).foregroundStyle(.red); Button("再保存") { store.persist() } } }
-                if draft.pendingMarkdown != nil {
-                    Section("送信結果の確認待ち") { Text("送信時の内容を保護するため編集を止めています。下のボタンで結果を確認してください。競合が続く場合は Markdown を書き出して GitHub 側と比較してください。") }
-                }
-                if draft.remoteChanged == true || (draft.remoteSHA != nil && draft.pendingMarkdown != nil) {
-                    Section("GitHubの記事を確認") {
-                        Text("端末の編集を別の下書きに残して、GitHubの最新記事を読み直せます。").font(.caption)
-                        Button("編集の控えを残して最新を読み込む") { showReloadConfirmation = true }.disabled(publishing || store.storageError != nil)
-                            .accessibilityIdentifier("article-load-latest")
-                    }
-                }
-                Group {
-                    Section("記事") {
-                        if draft.canChangeCategory {
-                            Picker("カテゴリ", selection: Binding(get: { draft.profile.articleDirectory }, set: { directory in
-                                guard let category = store.enabledCategories.first(where: { $0.id == directory }) else { return }
-                                do { try draft.selectCategory(category, configuration: store.site) }
-                                catch { message = error.localizedDescription }
-                            })) {
-                                if !store.enabledCategories.contains(where: { $0.id == draft.profile.articleDirectory }) {
-                                    Text(store.categoryLabel(for: draft) + "（現在の保存先）").tag(draft.profile.articleDirectory)
-                                }
-                                ForEach(store.enabledCategories) { category in Text(category.name).tag(category.id) }
-                            }.accessibilityIdentifier("article-category")
-                        } else {
-                            LabeledContent("カテゴリ", value: store.categoryLabel(for: draft))
-                        }
-                        TextField("タイトル", text: $draft.title, axis: .vertical).font(.headline)
-                        TextField("一覧に表示する説明文", text: $draft.description, axis: .vertical)
-                        DatePicker("記事の日付", selection: $draft.date, displayedComponents: .date).environment(\.locale, Locale(identifier: "ja_JP"))
-                        TextField("タグ（カンマ区切り）", text: $draft.tags)
-                        if !store.tagSuggestions.isEmpty {
-                            Menu {
-                                ForEach(store.tagSuggestions, id: \.self) { tag in
-                                    Button { draft.tags = ArticleTags.toggling(tag, in: draft.tags) } label: {
-                                        Label(tag, systemImage: RepositoryArticleMarkdown.tagValues(draft.tags).contains(tag) ? "checkmark" : "plus")
-                                    }
-                                }
-                            } label: { Label("タグ候補から選ぶ", systemImage: "tag") }
-                                .accessibilityIdentifier("article-select-tags")
-                        }
-                    }
-                    if !draft.extraHeaderFields.isEmpty {
-                        Section {
-                            ForEach(draft.extraHeaderFields.keys.sorted(), id: \.self) { key in
-                                if let value = draft.extraHeaderFields[key] {
-                                    Button { editingHeader = ArticleFixedField(key: key, value: value) } label: {
-                                        HStack { Text(key); Spacer(); Text(value.literal).foregroundStyle(WriterPalette.secondary); Image(systemName: "chevron.right") }
-                                    }.accessibilityIdentifier("article-header-" + key)
-                                }
-                            }
-                        } header: { Text("追加のヘッダー項目") } footer: {
-                            Text("この記事の値を編集します。draft が true の記事は、サイト側で下書きとして扱われます。カテゴリの初期値は変更しません。")
-                        }
-                    }
-                    Section("本文 · Markdown") {
-                        MarkdownEditor(text: $draft.body, minHeight: 150,
-                                       onAddMusic: { requestEditorAction(.music) }, onChooseMusic: { requestEditorAction(.stock) },
-                                       onAddPhoto: { requestEditorAction(.photo) }, onAddImageFile: { requestEditorAction(.imageFile) })
-                        Button { expandedBody = true } label: { Label("本文を広く開く", systemImage: "arrow.up.left.and.arrow.down.right") }
-                    }
-                    if !draft.attachedImages.isEmpty { ArticleImagesSection(draft: $draft, importing: $importingImage, photos: $photos, files: $files, message: $message) }
-                    if !draft.music.isEmpty {
-                        Section {
-                            ForEach(draft.music) { item in
-                                VStack(alignment: .leading) {
-                                    MusicItemEditor(item: musicBinding(for: item)) { draft.music.removeAll { $0.id == item.id } }
-                                    Button("この曲・紹介文をストックに保存") {
-                                        var saved = item; saved.id = item.sourceID ?? item.id; saved.sourceID = nil
-                                        if musicLibrary.update(saved) {
-                                            if let index = draft.music.firstIndex(where: { $0.id == item.id }) { draft.music[index].sourceID = saved.id }
-                                            message = "曲のストックに保存しました。"
-                                        } else { message = musicLibrary.storageError }
-                                    }.buttonStyle(.borderless).accessibilityIdentifier("music-save-stock-" + item.id.uuidString)
-                                }
-                            }
-                                .onMove { draft.music.move(fromOffsets: $0, toOffset: $1) }
-                                .onDelete { draft.music.remove(atOffsets: $0) }
-                            Button { choosingMusic = true } label: { Label("ストックから選ぶ", systemImage: "music.note.list") }
-                                .accessibilityIdentifier("music-choose-stock")
-                            Button { composingMusic = true } label: { Label("曲・アルバムを追加", systemImage: "plus.circle") }
-                                .accessibilityIdentifier("music-add-item")
-                        } header: { Text("曲紹介") } footer: {
-                            Text("曲紹介は本文のあとに掲載します。各項目で削除でき、編集ボタンで並べ替えできます。")
-                        }
-                    }
-                }.disabled(publishing || draft.hasPendingOperation)
-                Section {
-                    Button { preview = true } label: { Label("プレビュー・Markdown を確認", systemImage: "doc.text.magnifyingglass") }
-                    Button { exporting = true } label: { Label("Markdown を書き出す", systemImage: "square.and.arrow.up") }
-                        .disabled(draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || draft.profile.frontMatter.requireDescription && draft.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    if !draft.referencedImages.isEmpty {
-                        Button { Task { await exportArticleBundle() } } label: { Label("記事と写真をまとめて書き出す", systemImage: "folder.badge.plus") }
-                            .disabled(publishing || importingImage || store.storageError != nil)
-                        Text("Markdownだけの書き出しには写真ファイルが含まれません。").font(.caption).foregroundStyle(WriterPalette.secondary)
-                    }
-                    if let validation = draft.validation, draft.pendingMarkdown == nil { Text(validation).font(.caption).foregroundStyle(WriterPalette.secondary) }
-                }
-                Section {
-                    Button { showPublishConfirmation = true } label: {
-                        HStack { Label(draft.pendingMarkdown != nil ? "結果を確認・再送" : draft.isPublished ? "変更内容を確認" : "公開内容を確認", systemImage: "arrow.up.doc"); if publishing { Spacer(); ProgressView() } }
-                    }.disabled(publishDisabled)
-                    if let url = draft.commitURL.flatMap(URL.init(string:)) { Link("GitHub のコミットを開く", destination: url) }
-                    if let url = store.site.actionsURL { Link("サイトへの反映状況を確認", destination: url) }
-                } footer: { Text("設定したブランチへ保存すると、サイト側の公開処理が始まります。GitHub への保存とサイトへの反映は別です。") }
-            }.listRowBackground(WriterPalette.surface)
-        }.writerCanvas()
+        editorLayout
         .environment(\.defaultMinListRowHeight, 36)
         .font(.subheadline)
         .scrollDismissesKeyboard(.interactively)
         .writerChrome().navigationTitle(draft.isPublished ? "記事を編集" : "記事を書く").navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) { Button("閉じる") { if store.finishEditing(draft) { dismiss() } }.disabled(publishing || importingImage) }
+            #if !targetEnvironment(macCatalyst)
+            ToolbarItem(placement: .cancellationAction) {
+                Button("閉じる") {
+                    if store.finishEditing(draft) { if let onClose { onClose() } else { dismiss() } }
+                }.disabled(publishing || importingImage).accessibilityLabel(embedded ? "記事を閉じる" : "閉じる")
+            }
+            #endif
+            #if targetEnvironment(macCatalyst)
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button { macInspector = false; macPreview.toggle() } label: { Image(systemName: macPreview ? "eye.fill" : "eye") }
+                    .help("プレビュー（⇧⌘P）").accessibilityLabel("プレビュー").accessibilityIdentifier("mac-preview-toggle")
+                Button { macPreview = false; macInspector.toggle() } label: { Image(systemName: "slider.horizontal.3") }
+                    .help("記事情報・写真・曲紹介").accessibilityLabel("記事情報").accessibilityIdentifier("mac-inspector-toggle")
+                Button { exporting = true } label: { Image(systemName: "square.and.arrow.up") }
+                    .help("Markdownを書き出す（⇧⌘E）").accessibilityLabel("Markdownを書き出す")
+            }
+            #endif
+            #if !targetEnvironment(macCatalyst)
             if !draft.music.isEmpty {
                 ToolbarItem(placement: .primaryAction) { EditButton().disabled(publishing || draft.hasPendingOperation) }
             }
+            #endif
             ToolbarItem(placement: .confirmationAction) {
                 Button { showPublishConfirmation = true } label: {
                     Group {
-                        if publishing { ProgressView().tint(WriterPalette.onAccent) }
+                        if publishing { ProgressView().tint(publishForeground) }
                         else { Image(systemName: "arrow.up").font(.body.weight(.semibold)) }
                     }
                 }
                 .modifier(PublishButtonAppearance())
                 .buttonBorderShape(.circle)
-                .tint(WriterPalette.accent)
-                .foregroundStyle(WriterPalette.onAccent)
+                .tint(publishTint)
+                .foregroundStyle(publishForeground)
                 .disabled(publishDisabled)
                 .accessibilityLabel(draft.pendingMarkdown != nil ? "Push・結果を確認して再送" : "Push・公開内容を確認")
                 .accessibilityIdentifier("article-push")
@@ -231,20 +186,19 @@ struct MarkdownFile: FileDocument {
             NavigationStack {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("公開前の最終確認").font(.title2.bold())
-                    Text("\(store.site.repositorySlug) · \(store.site.branch)\n\(draft.path)").font(.caption).textSelection(.enabled)
+                    Text("\(store.site.repositorySlug) · \(store.site.branch)\n\(draft.path)").font(.writerCaption).textSelection(.enabled)
                     Text("以下の全文が GitHub に送信され、公開サイトに掲載されます。")
                     if !draft.referencedImages.isEmpty {
-                        Text("写真 \(draft.referencedImages.count)枚 · 送信前にJPEGの容量とメタデータを検査します。").font(.caption)
+                        Text("写真 \(draft.referencedImages.count)枚 · 送信前にJPEGの容量とメタデータを検査します。").font(.writerCaption)
                     }
-                    ScrollView { Text(draft.pendingMarkdown ?? draft.markdown).font(.system(.caption, design: .monospaced)).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled) }
+                    ScrollView { Text(draft.pendingMarkdown ?? draft.markdown).font(.writerCode).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled) }
                     Button("この内容を GitHub に保存・公開") { showPublishConfirmation = false; Task { await publish() } }.buttonStyle(.borderedProminent).foregroundStyle(WriterPalette.onAccent).frame(maxWidth: .infinity)
                 }.padding().toolbar { Button("戻る") { showPublishConfirmation = false } }
             }
         }
-        .fileExporter(isPresented: $exporting, document: MarkdownFile(text: draft.pendingMarkdown ?? draft.markdown), contentType: MarkdownFile.markdownType, defaultFilename: draft.filename) { result in
-            if case .failure(let error) = result { message = "書き出せませんでした。\(error.localizedDescription)" }
-        }
-        .fileExporter(isPresented: $exportingBundle, document: bundleFile, contentType: .folder, defaultFilename: "article-" + draft.id.uuidString.lowercased()) { result in
+        .fileExporter(isPresented: Binding(get: { exporting || exportingBundle }, set: { if !$0 { exporting = false; exportingBundle = false } }),
+                      document: exportDocument, contentType: exportingBundle ? .folder : MarkdownFile.markdownType,
+                      defaultFilename: exportingBundle ? "article-" + draft.id.uuidString.lowercased() : draft.filename) { result in
             if case .failure(let error) = result { message = "書き出せませんでした。\(error.localizedDescription)" }
         }
         .alert("お知らせ", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) { Button("OK") { message = nil } } message: { Text(message ?? "") }
@@ -252,6 +206,267 @@ struct MarkdownFile: FileDocument {
             Button("控えを残して読み込む") { Task { await loadLatest() } }
             Button("キャンセル", role: .cancel) { }
         }
+    }
+    private var exportDocument: ArticleExportDocument? {
+        if exportingBundle { return bundleFile.map(ArticleExportDocument.bundle) }
+        return .markdown(MarkdownFile(text: draft.pendingMarkdown ?? draft.markdown))
+    }
+    @ViewBuilder private var editorLayout: some View {
+        #if targetEnvironment(macCatalyst)
+        macLayout
+        #else
+        Form {
+            Group {
+                notices
+                Group { articleFields; articleBody }.disabled(publishing || draft.hasPendingOperation)
+                articleActions
+            }.listRowBackground(WriterPalette.surface)
+        }.writerCanvas()
+        #endif
+    }
+    @ViewBuilder private var notices: some View {
+        if let error = store.storageError { Section { Text(error).foregroundStyle(.red); Button("再保存") { store.persist() } } }
+        if draft.pendingMarkdown != nil {
+            Section("送信結果の確認待ち") { Text("送信時の内容を保護するため編集を止めています。下のボタンで結果を確認してください。競合が続く場合は Markdown を書き出して GitHub 側と比較してください。") }
+        }
+        if draft.remoteChanged == true || (draft.remoteSHA != nil && draft.pendingMarkdown != nil) {
+            Section("GitHubの記事を確認") {
+                Text("端末の編集を別の下書きに残して、GitHubの最新記事を読み直せます。").font(.writerCaption)
+                Button("編集の控えを残して最新を読み込む") { showReloadConfirmation = true }.disabled(publishing || store.storageError != nil)
+                    .accessibilityIdentifier("article-load-latest")
+            }
+        }
+    }
+    @ViewBuilder private var articleFields: some View {
+        Section("記事") {
+            if draft.canChangeCategory {
+                Picker("カテゴリ", selection: Binding(get: { draft.profile.articleDirectory }, set: { directory in
+                    guard let category = store.enabledCategories.first(where: { $0.id == directory }) else { return }
+                    do { try draft.selectCategory(category, configuration: store.site) }
+                    catch { message = error.localizedDescription }
+                })) {
+                    if !store.enabledCategories.contains(where: { $0.id == draft.profile.articleDirectory }) {
+                        Text(store.categoryLabel(for: draft) + "（現在の保存先）").tag(draft.profile.articleDirectory)
+                    }
+                    ForEach(store.enabledCategories) { category in Text(category.name).tag(category.id) }
+                }.accessibilityIdentifier("article-category")
+            } else {
+                LabeledContent("カテゴリ", value: store.categoryLabel(for: draft))
+            }
+            TextField("タイトル", text: $draft.title, axis: .vertical).font(.headline)
+            TextField("一覧に表示する説明文", text: $draft.description, axis: .vertical)
+            DatePicker("記事の日付", selection: $draft.date, displayedComponents: .date).environment(\.locale, Locale(identifier: "ja_JP"))
+            TextField("タグ（カンマ区切り）", text: $draft.tags)
+            if !store.tagSuggestions.isEmpty {
+                Menu {
+                    ForEach(store.tagSuggestions, id: \.self) { tag in
+                        Button { draft.tags = ArticleTags.toggling(tag, in: draft.tags) } label: {
+                            Label(tag, systemImage: RepositoryArticleMarkdown.tagValues(draft.tags).contains(tag) ? "checkmark" : "plus")
+                        }
+                    }
+                } label: { Label("タグ候補から選ぶ", systemImage: "tag") }
+                    .accessibilityIdentifier("article-select-tags")
+            }
+        }
+        if !draft.extraHeaderFields.isEmpty {
+            Section {
+                ForEach(draft.extraHeaderFields.keys.sorted(), id: \.self) { key in
+                    if let value = draft.extraHeaderFields[key] {
+                        Button { editingHeader = ArticleFixedField(key: key, value: value) } label: {
+                            HStack { Text(key); Spacer(); Text(value.literal).foregroundStyle(WriterPalette.secondary); Image(systemName: "chevron.right") }
+                        }.accessibilityIdentifier("article-header-" + key)
+                    }
+                }
+            } header: { Text("追加のヘッダー項目") } footer: {
+                Text("この記事の値を編集します。draft が true の記事は、サイト側で下書きとして扱われます。カテゴリの初期値は変更しません。")
+            }
+        }
+    }
+    @ViewBuilder private var articleBody: some View {
+        Section("本文 · Markdown") {
+            MarkdownEditor(text: $draft.body, minHeight: 150,
+                           onAddMusic: { requestEditorAction(.music) }, onChooseMusic: { requestEditorAction(.stock) },
+                           onAddPhoto: { requestEditorAction(.photo) }, onAddImageFile: { requestEditorAction(.imageFile) })
+            Button { expandedBody = true } label: { Label("本文を広く開く", systemImage: "arrow.up.left.and.arrow.down.right") }
+        }
+        articleBodyAttachments
+    }
+    @ViewBuilder private var articleActions: some View {
+        Section {
+                Button { preview = true } label: { Label("プレビュー・Markdown を確認", systemImage: "doc.text.magnifyingglass").fixedSize(horizontal: false, vertical: true) }
+                Button { exporting = true } label: { Label("Markdown を書き出す", systemImage: "square.and.arrow.up").fixedSize(horizontal: false, vertical: true) }
+                .disabled(draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || draft.profile.frontMatter.requireDescription && draft.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            if !draft.referencedImages.isEmpty {
+                Button { Task { await exportArticleBundle() } } label: { Label("記事と写真をまとめて書き出す", systemImage: "folder.badge.plus").fixedSize(horizontal: false, vertical: true) }
+                    .disabled(publishing || importingImage || store.storageError != nil)
+                Text("Markdownだけの書き出しには写真ファイルが含まれません。").font(.writerCaption).foregroundStyle(WriterPalette.secondary)
+            }
+            if let validation = draft.validation, draft.pendingMarkdown == nil { Text(validation).font(.writerCaption).foregroundStyle(WriterPalette.secondary) }
+        }
+        Section {
+            Button { showPublishConfirmation = true } label: {
+                HStack { Label(draft.pendingMarkdown != nil ? "結果を確認・再送" : draft.isPublished ? "変更内容を確認" : "公開内容を確認", systemImage: "arrow.up.doc"); if publishing { Spacer(); ProgressView() } }
+            }.disabled(publishDisabled)
+            if let url = draft.commitURL.flatMap(URL.init(string:)) { Link("GitHub のコミットを開く", destination: url) }
+            if let url = store.site.actionsURL { Link("サイトへの反映状況を確認", destination: url) }
+        } footer: { Text("設定したブランチへ保存すると、サイト側の公開処理が始まります。GitHub への保存とサイトへの反映は別です。") }
+    }
+    @ViewBuilder private var articleBodyAttachments: some View {
+        if !draft.attachedImages.isEmpty { ArticleImagesSection(draft: $draft, importing: $importingImage, photos: $photos, files: $files, message: $message) }
+        if !draft.music.isEmpty {
+            Section {
+                ForEach(draft.music) { item in
+                    VStack(alignment: .leading) {
+                        MusicItemEditor(item: musicBinding(for: item)) { draft.music.removeAll { $0.id == item.id } }
+                        Button("この曲・紹介文をストックに保存") {
+                            var saved = item; saved.id = item.sourceID ?? item.id; saved.sourceID = nil
+                            if musicLibrary.update(saved) {
+                                if let index = draft.music.firstIndex(where: { $0.id == item.id }) { draft.music[index].sourceID = saved.id }
+                                message = "曲のストックに保存しました。"
+                            } else { message = musicLibrary.storageError }
+                        }.buttonStyle(.borderless).accessibilityIdentifier("music-save-stock-" + item.id.uuidString)
+                    }
+                }
+                    .onMove { draft.music.move(fromOffsets: $0, toOffset: $1) }
+                    .onDelete { draft.music.remove(atOffsets: $0) }
+                Button { choosingMusic = true } label: { Label("ストックから選ぶ", systemImage: "music.note.list") }
+                    .accessibilityIdentifier("music-choose-stock")
+                Button { composingMusic = true } label: { Label("曲・アルバムを追加", systemImage: "plus.circle") }
+                    .accessibilityIdentifier("music-add-item")
+            } header: { Text("曲紹介") } footer: {
+                Text("曲紹介は本文のあとに掲載します。各項目で削除でき、編集ボタンで並べ替えできます。")
+            }
+        }
+    }
+    #if targetEnvironment(macCatalyst)
+    private var macInteractionLocked: Bool {
+        publishing || importingImage || preview || expandedBody || choosingMusic || composingMusic || photos || files ||
+        exporting || exportingBundle || showPublishConfirmation || showReloadConfirmation || editingHeader != nil
+    }
+    private var macLayout: some View {
+        GeometryReader { geometry in
+            HStack(spacing: 0) {
+                VStack(spacing: 0) {
+                    HStack(spacing: 10) {
+                        Button("閉じる") { closeEditor() }
+                            .buttonStyle(.bordered).fixedSize()
+                            .disabled(publishing || importingImage)
+                            .accessibilityLabel(embedded ? "記事を閉じる" : "閉じる")
+                            .accessibilityIdentifier("mac-close-editor")
+                        Label(draft.isPublished ? "投稿済み" : "下書き", systemImage: draft.isPublished ? "checkmark.circle" : "doc")
+                            .font(.writerCaption.weight(.medium)).foregroundStyle(WriterPalette.accent)
+                        Spacer()
+                        Text(store.storageError == nil ? "このMacに自動保存" : "保存できていません")
+                            .font(.writerCaption).foregroundStyle(store.storageError == nil ? WriterPalette.secondary : .red)
+                    }.padding(.horizontal, 24).padding(.vertical, 12)
+                    Divider()
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 16) {
+                            if store.storageError != nil || draft.hasPendingOperation || draft.remoteChanged == true {
+                                Form { notices }.frame(height: 180)
+                            }
+                            Group {
+                            TextField("タイトル", text: $draft.title, axis: .vertical)
+                                .font(.system(size: 26, weight: .medium)).textFieldStyle(.plain)
+                                .padding(.horizontal, 12)
+                                .accessibilityIdentifier("mac-article-title")
+                            TextField("一覧に表示する説明文", text: $draft.description, axis: .vertical)
+                                .font(.subheadline).foregroundStyle(WriterPalette.secondary).textFieldStyle(.plain)
+                                .padding(.horizontal, 12)
+                            macMetadata.padding(.horizontal, 12)
+                            MarkdownEditor(text: $draft.body, minHeight: max(300, geometry.size.height - 270),
+                                           onAddMusic: { requestEditorAction(.music) }, onChooseMusic: { requestEditorAction(.stock) },
+                                           onAddPhoto: { requestEditorAction(.photo) }, onAddImageFile: { requestEditorAction(.imageFile) })
+                            }.disabled(publishing || draft.hasPendingOperation)
+                        }.padding(24).frame(maxWidth: 900).frame(maxWidth: .infinity)
+                    }
+                    Divider()
+                    HStack {
+                        Text("Markdown")
+                        Spacer()
+                        Text("\(draft.body.count.formatted()) 文字").monospacedDigit()
+                    }.font(.writerCaption).foregroundStyle(WriterPalette.secondary)
+                        .padding(.horizontal, 24).padding(.vertical, 10)
+                }.background(WriterPalette.background)
+                if macPreview {
+                    Divider()
+                    VStack(spacing: 0) {
+                        HStack {
+                            Label("プレビュー", systemImage: "eye")
+                            Spacer()
+                            Button { macPreview = false } label: { Image(systemName: "xmark") }.buttonStyle(.plain).accessibilityLabel("プレビューを閉じる")
+                        }.font(.writerCaption.weight(.medium)).padding(14)
+                        Divider()
+                        ZStack {
+                            BlogWebPreview(draft: macPreviewDraft ?? draft, loading: $macPreviewLoading, error: $macPreviewError, imageFiles: store.imageFiles, configuration: store.site)
+                                .onAppear { macPreviewDraft = draft }
+                                .task(id: draft) {
+                                    do {
+                                        try await Task.sleep(for: .milliseconds(350))
+                                        macPreviewDraft = draft
+                                    } catch { }
+                                }
+                            if macPreviewLoading { ProgressView() }
+                            if let macPreviewError { Text(macPreviewError).font(.writerCaption).padding() }
+                        }
+                    }.frame(width: max(280, geometry.size.width * 0.44))
+                } else if macInspector {
+                    Divider()
+                    VStack(spacing: 0) {
+                        HStack {
+                            Label("記事情報", systemImage: "slider.horizontal.3")
+                            Spacer()
+                            Button { macInspector = false } label: { Image(systemName: "xmark") }
+                                .buttonStyle(.plain).accessibilityLabel("記事情報を閉じる")
+                        }.font(.writerCaption.weight(.medium)).padding(14)
+                        Divider()
+                        Form {
+                            if !draft.music.isEmpty {
+                                Section { EditButton().disabled(publishing || draft.hasPendingOperation) }
+                            }
+                            Group { articleFields; articleBodyAttachments }
+                                .disabled(publishing || draft.hasPendingOperation)
+                            articleActions
+                        }.writerCanvas()
+                    }.frame(width: 340)
+                }
+            }
+        }
+        .focusedSceneValue(\.writerEditor, MacEditorActions(
+            save: { _ = store.update(draft) }, preview: { macInspector = false; macPreview.toggle() }, export: { exporting = true },
+            disabled: macInteractionLocked))
+        .onChange(of: macInteractionLocked) { _, value in onBusyChange?(value) }
+        .onChange(of: macPreview || macInspector) { _, value in onPanelChange?(value) }
+        .onAppear { if !embedded { interactionChanged(interactionID, true) } }
+        .onDisappear { onBusyChange?(false); interactionChanged(interactionID, false); onPanelChange?(false) }
+    }
+    private var macMetadata: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 6) {
+                Text(store.categoryLabel(for: draft)).fixedSize()
+                Text("·")
+                Text(draft.date, format: .dateTime.year().month().day()).fixedSize()
+                Spacer(minLength: 12)
+                macMetadataButton
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                Text(store.categoryLabel(for: draft)).fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Text(draft.date, format: .dateTime.year().month().day())
+                    Spacer()
+                    macMetadataButton
+                }
+            }
+        }.font(.writerCaption).foregroundStyle(WriterPalette.secondary)
+    }
+    private var macMetadataButton: some View {
+        Button { macPreview = false; macInspector.toggle() } label: {
+            Label("記事情報", systemImage: "slider.horizontal.3").fixedSize()
+        }.buttonStyle(.borderless).accessibilityIdentifier("mac-article-info")
+    }
+    #endif
+    private func closeEditor() {
+        if store.finishEditing(draft) { if let onClose { onClose() } else { dismiss() } }
     }
     private enum EditorAttachmentAction { case music, stock, photo, imageFile }
     private func requestEditorAction(_ action: EditorAttachmentAction) {
@@ -397,18 +612,18 @@ private struct PublishButtonAppearance: ViewModifier {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 TextField("曲・アルバム名", text: $item.title).font(.headline)
                 if showsDelete { Button(role: .destructive, action: onDelete) {
-                    Label("削除", systemImage: "trash").font(.caption)
+                    Label("削除", systemImage: "trash").font(.writerCaption)
                         .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
                 }.accessibilityLabel(item.title.isEmpty ? "この曲・アルバムを削除" : "\(item.title)を削除")
                     .accessibilityIdentifier("music-delete-\(item.id)") }
             }
             TextField("アーティスト", text: $item.artist)
             TextField("音楽サービスの曲の共有 URL（任意）", text: $item.youtubeURL).textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
-            Text("YouTube Music・Apple Music・Amazon Musicに対応。曲名・アーティストの手入力でも続けられます。").font(.caption).foregroundStyle(WriterPalette.secondary)
-            if let message = sourceMessage { Text(message).font(.caption).foregroundStyle(.red) }
-            if let resolutionMessage { Text(resolutionMessage).font(.caption).foregroundStyle(WriterPalette.secondary) }
+            Text("YouTube Music・Apple Music・Amazon Musicに対応。曲名・アーティストの手入力でも続けられます。").font(.writerCaption).foregroundStyle(WriterPalette.secondary)
+            if let message = sourceMessage { Text(message).font(.writerCaption).foregroundStyle(.red) }
+            if let resolutionMessage { Text(resolutionMessage).font(.writerCaption).foregroundStyle(WriterPalette.secondary) }
             spotifySelection
-            Text("この音についてのコメント").font(.caption).foregroundStyle(WriterPalette.secondary)
+            Text("この音についてのコメント").font(.writerCaption).foregroundStyle(WriterPalette.secondary)
             MarkdownEditor(text: $item.comment, identifier: "music-comment-\(item.id)", minHeight: 100)
         }.font(.subheadline).padding(.vertical, 5)
             // Form otherwise treats automatic buttons/links in this VStack as one tappable row.
@@ -427,7 +642,7 @@ private struct PublishButtonAppearance: ViewModifier {
                 Label("Spotify", systemImage: "music.note").font(.subheadline.bold())
                 Spacer()
                 if SpotifyLink(item.spotifyURL) != nil {
-                    Text(item.confirmed ? "確認済み" : "未確認").font(.caption).foregroundStyle(WriterPalette.secondary)
+                    Text(item.confirmed ? "確認済み" : "未確認").font(.writerCaption).foregroundStyle(WriterPalette.secondary)
                 }
             }
             if let link = SpotifyLink(item.spotifyURL) {
@@ -435,25 +650,25 @@ private struct PublishButtonAppearance: ViewModifier {
                     candidateArtwork(selectedCandidate?.artworkURL, size: 44)
                     VStack(alignment: .leading, spacing: 3) {
                         Text(selectedCandidate?.title ?? item.title).font(.subheadline.bold())
-                        Text(selectedCandidate?.artist ?? item.artist).font(.caption).foregroundStyle(WriterPalette.secondary)
+                        Text(selectedCandidate?.artist ?? item.artist).font(.writerCaption).foregroundStyle(WriterPalette.secondary)
                     }
                 }
-                if let note = selectedCandidate?.matchNote { Text(note).font(.caption).foregroundStyle(WriterPalette.secondary) }
+                if let note = selectedCandidate?.matchNote { Text(note).font(.writerCaption).foregroundStyle(WriterPalette.secondary) }
                 HStack {
                     Link(destination: link.url) { Label("聴いて確認", systemImage: "play.circle") }
                         .accessibilityIdentifier("music-open-selected")
                     Spacer()
                     Button("変更") { showSpotifyPicker() }.accessibilityIdentifier("music-change-spotify")
                 }
-                Toggle("曲・バージョンを確認済み", isOn: $item.confirmed).font(.caption)
+                Toggle("曲・バージョンを確認済み", isOn: $item.confirmed).font(.writerCaption)
                     .accessibilityIdentifier("music-confirm-spotify")
             } else {
                 if resolving {
-                    HStack(spacing: 8) { ProgressView(); Text("候補を探しています…").font(.caption).foregroundStyle(WriterPalette.secondary) }
+                    HStack(spacing: 8) { ProgressView(); Text("候補を探しています…").font(.writerCaption).foregroundStyle(WriterPalette.secondary) }
                 } else if let resolutionMessage, candidates.isEmpty {
-                    Text(resolutionMessage).font(.caption).foregroundStyle(WriterPalette.secondary)
+                    Text(resolutionMessage).font(.writerCaption).foregroundStyle(WriterPalette.secondary)
                 }
-                if !item.spotifyURL.isEmpty { Text("SpotifyのURLを確認してください。").font(.caption).foregroundStyle(.red) }
+                if !item.spotifyURL.isEmpty { Text("SpotifyのURLを確認してください。").font(.writerCaption).foregroundStyle(.red) }
                 Button { showSpotifyPicker() } label: {
                     Label(candidates.isEmpty ? "Spotifyを選ぶ" : "候補から選ぶ（\(candidates.count)件）", systemImage: "magnifyingglass")
                 }.buttonStyle(.bordered).accessibilityIdentifier("music-choose-spotify")
@@ -479,11 +694,11 @@ private struct PublishButtonAppearance: ViewModifier {
                                         candidateArtwork(candidate.artworkURL, size: 56)
                                         VStack(alignment: .leading, spacing: 4) {
                                             Text(candidate.title).font(.subheadline.bold())
-                                            Text(candidate.artist).font(.caption).foregroundStyle(WriterPalette.secondary)
-                                            if !candidate.album.isEmpty { Text(candidate.album).font(.caption).foregroundStyle(WriterPalette.secondary) }
+                                            Text(candidate.artist).font(.writerCaption).foregroundStyle(WriterPalette.secondary)
+                                            if !candidate.album.isEmpty { Text(candidate.album).font(.writerCaption).foregroundStyle(WriterPalette.secondary) }
                                         }
                                     }
-                                    if let note = candidate.matchNote { Text(note).font(.caption).foregroundStyle(WriterPalette.secondary) }
+                                    if let note = candidate.matchNote { Text(note).font(.writerCaption).foregroundStyle(WriterPalette.secondary) }
                                     HStack {
                                         Link(destination: candidate.spotify.url) { Label("Spotifyで聴く", systemImage: "play.circle") }
                                             .font(.subheadline).accessibilityIdentifier("music-open-candidate-" + candidate.spotify.id)
@@ -529,7 +744,7 @@ private struct PublishButtonAppearance: ViewModifier {
                                 .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
                                 .accessibilityIdentifier("music-manual-spotify-url")
                             if !manualSpotifyURL.isEmpty, SpotifyLink(manualSpotifyURL) == nil {
-                                Text("Spotifyの曲・アルバムの共有URLを入力してください。").font(.caption).foregroundStyle(.red)
+                                Text("Spotifyの曲・アルバムの共有URLを入力してください。").font(.writerCaption).foregroundStyle(.red)
                             }
                             Button("このURLを使う") {
                                 guard let link = SpotifyLink(manualSpotifyURL) else { return }
@@ -590,7 +805,7 @@ private struct PublishButtonAppearance: ViewModifier {
             VStack {
                 Picker("表示", selection: $source) { Text("サイト表示").tag(false); Text("Markdown 全文").tag(true) }.pickerStyle(.segmented).padding(.horizontal)
                 if source {
-                    ScrollView { Text(draft.pendingMarkdown ?? draft.markdown).font(.system(.caption, design: .monospaced)).frame(maxWidth: .infinity, alignment: .leading).padding(24).textSelection(.enabled) }
+                    ScrollView { Text(draft.pendingMarkdown ?? draft.markdown).font(.writerCode).frame(maxWidth: .infinity, alignment: .leading).padding(24).textSelection(.enabled) }
                 } else {
                     ZStack {
                         BlogWebPreview(draft: draft, loading: $previewLoading, error: $previewError, imageFiles: store.imageFiles, configuration: store.site)
@@ -598,7 +813,7 @@ private struct PublishButtonAppearance: ViewModifier {
                         if let previewError { Text(previewError).font(.subheadline).padding(24) }
                     }
                     Text("下書きの表示確認です。公開・コメントの送信は行いません。")
-                        .font(.caption2).foregroundStyle(WriterPalette.secondary).padding(.horizontal).padding(.bottom, 6)
+                        .font(.writerCaption2).foregroundStyle(WriterPalette.secondary).padding(.horizontal).padding(.bottom, 6)
                 }
             }.writerChrome().navigationTitle("プレビュー").navigationBarTitleDisplayMode(.inline).toolbar { Button("閉じる") { dismiss() } }
         }
@@ -610,20 +825,33 @@ private struct PublishButtonAppearance: ViewModifier {
     @State private var connection = SiteConfiguration()
     @State private var token = ""
     @State private var message = ""
+    #if targetEnvironment(macCatalyst)
+    @State private var sessionTokenActive = false
+    @AppStorage("mac-appearance") private var macAppearance = "dark"
+    #endif
     var body: some View {
         NavigationStack {
             Form {
                 Group {
+                    #if targetEnvironment(macCatalyst)
+                    Section("外観") {
+                        Picker("表示モード", selection: $macAppearance) {
+                            Text("ダーク").tag("dark")
+                            Text("ライト").tag("light")
+                            Text("システムに合わせる").tag("system")
+                        }.accessibilityIdentifier("mac-appearance")
+                    }
+                    #endif
                     Section("このアプリ") {
                         Text("記事と自分用メモを、この端末でまとめます。").font(.subheadline)
-                        Text("記事・メモは端末内に保存します。クラウド同期はありません。アプリを削除すると失われるため、大切な記事はMarkdownを書き出してください。").font(.caption).foregroundStyle(WriterPalette.secondary)
+                        Text("記事・メモは端末内に保存します。クラウド同期はありません。アプリを削除すると失われるため、大切な記事はMarkdownを書き出してください。").font(.writerCaption).foregroundStyle(WriterPalette.secondary)
                     }
                     Section {
                         NavigationLink { ArticleCategoriesSettingsView() } label: { Label("記事のカテゴリ・タグ", systemImage: "folder") }
                             .accessibilityIdentifier("settings-article-categories")
                         Text("使用中: " + store.enabledCategories.map(\.name).joined(separator: "、"))
-                            .font(.caption).foregroundStyle(WriterPalette.secondary)
-                        if let error = store.categorySettingsError { Text(error).font(.caption).foregroundStyle(.red) }
+                            .font(.writerCaption).foregroundStyle(WriterPalette.secondary)
+                        if let error = store.categorySettingsError { Text(error).font(.writerCaption).foregroundStyle(.red) }
                     } footer: { Text("カテゴリごとの保存先・記事形式・項目名と、タグ候補を設定できます。書く記事のカテゴリは記事作成画面で選びます。") }
                     Section {
                         DisclosureGroup("GitHub公開の接続設定") {
@@ -638,36 +866,52 @@ private struct PublishButtonAppearance: ViewModifier {
                             TextField("サイト名", text: $connection.title)
                             TextField("サイトの説明", text: $connection.tagline)
                             Text("記事と画像の保存先・記事形式は「記事のカテゴリ・タグ」で設定できます。プロジェクトサイトのURLには /リポジトリ名/ を含めます。")
-                                .font(.caption).foregroundStyle(WriterPalette.secondary)
+                                .font(.writerCaption).foregroundStyle(WriterPalette.secondary)
                             if store.hasConnectedArticles {
                                 Text("投稿済み・確認待ちの記事がある間は、ユーザー名・リポジトリ・ブランチを変更できません。")
-                                    .font(.caption).foregroundStyle(WriterPalette.secondary)
+                                    .font(.writerCaption).foregroundStyle(WriterPalette.secondary)
                             }
                             Button("公開先の設定を保存") {
                                 do { try store.saveSiteConfiguration(connection); connection = store.site; token = ""; message = "公開先を保存しました。" }
                                 catch { message = error.localizedDescription }
                             }
-                            Text("現在の公開先: \(store.site.connectionError == nil ? store.site.repositorySlug + " · " + store.site.branch : "未設定")").font(.caption)
+                            Text("現在の公開先: \(store.site.connectionError == nil ? store.site.repositorySlug + " · " + store.site.branch : "未設定")").font(.writerCaption)
                             SecureField("トークンを入力", text: $token).textInputAutocapitalization(.never).autocorrectionDisabled()
-                            Button("この iPhone の Keychain に保存") {
+                            Button("この端末の Keychain に保存") {
                                 do { guard store.site.connectionError == nil else { message = "先に公開先の設定を保存してください。"; return }; guard !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { message = "トークンを入力してください。"; return }; try TokenVault.save(token); token = ""; message = "保存しました。公開するまで GitHub に送信しません。" } catch { message = error.localizedDescription }
                             }
+                            #if targetEnvironment(macCatalyst)
+                            Button("この起動中だけトークンを使う") {
+                                guard store.site.connectionError == nil else { message = "先に公開先の設定を保存してください。"; return }
+                                guard !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { message = "トークンを入力してください。"; return }
+                                TokenVault.useForSession(token); token = ""; sessionTokenActive = true
+                                message = "この起動中だけ使います。アプリを終了すると再入力が必要です。"
+                            }.accessibilityIdentifier("settings-token-session")
+                            Text("Keychainに保存できない場合は、この起動中だけ使えます。トークンをファイルに保存せず、アプリを終了すると破棄します。")
+                                .font(.writerCaption).foregroundStyle(WriterPalette.secondary)
+                            if sessionTokenActive {
+                                Label("トークンを一時利用中", systemImage: "lock").font(.writerCaption)
+                                Button("トークンの一時利用を終了") {
+                                    TokenVault.clearSessionToken(); sessionTokenActive = false; message = "一時利用を終了しました。"
+                                }
+                            }
+                            #endif
                             Button("保存済みトークンを削除", role: .destructive) { do { try TokenVault.save(""); message = "削除しました。" } catch { message = error.localizedDescription } }
-                            Text("接続する場合は、このリポジトリのContents: Read and writeだけを許可したFine-grained tokenを本人が入力します。自分用メモには公開機能がありません。").font(.caption).foregroundStyle(WriterPalette.secondary)
-                            if !message.isEmpty { Text(message).font(.caption) }
+                            Text("接続する場合は、このリポジトリのContents: Read and writeだけを許可したFine-grained tokenを本人が入力します。自分用メモには公開機能がありません。").font(.writerCaption).foregroundStyle(WriterPalette.secondary)
+                            if !message.isEmpty { Text(message).font(.writerCaption) }
                         }
                     }
                     Section("アプリ情報") {
                         NavigationLink { DependencyInfoView() } label: { Label("ライセンス", systemImage: "doc.text") }
-                        Text("バージョン \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.2.1")").font(.caption).foregroundStyle(WriterPalette.secondary)
+                        Text("バージョン \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.2.1")").font(.writerCaption).foregroundStyle(WriterPalette.secondary)
                     }
                     Section("写真の保存容量") {
                         Button("投稿済み写真の端末コピーを整理") {
                             do { let count = try store.clearPublishedImageCopies(); message = "\(count)枚の端末コピーを整理しました。公開画像は残り、必要なときに再取得できます。" }
                             catch { message = error.localizedDescription }
                         }
-                        Text("未投稿・編集中・送信結果の確認待ちの写真は残します。元の写真アプリの画像は変更しません。").font(.caption).foregroundStyle(WriterPalette.secondary)
-                        if !message.isEmpty { Text(message).font(.caption) }
+                        Text("未投稿・編集中・送信結果の確認待ちの写真は残します。元の写真アプリの画像は変更しません。").font(.writerCaption).foregroundStyle(WriterPalette.secondary)
+                        if !message.isEmpty { Text(message).font(.writerCaption) }
                     }
                     Section {
                         Picker("完全に削除するまで", selection: Binding(get: { store.trashRetention }, set: { value in
@@ -678,11 +922,16 @@ private struct PublishButtonAppearance: ViewModifier {
                             ForEach(TrashRetentionPeriod.allCases) { period in Text(period.label).tag(period) }
                         }.accessibilityIdentifier("settings-trash-retention")
                         Text("記事と自分用メモに共通です。期限を過ぎた項目は、アプリ起動時と設定変更時に端末から完全に削除します。公開サイトの記事は削除しません。")
-                            .font(.caption).foregroundStyle(WriterPalette.secondary)
+                            .font(.writerCaption).foregroundStyle(WriterPalette.secondary)
                     } header: { Text("ゴミ箱") }
                 }.listRowBackground(WriterPalette.surface)
             }.writerCanvas().writerChrome().navigationTitle("設定").navigationBarTitleDisplayMode(.inline).environment(\.defaultMinListRowHeight, 36)
                 .onAppear { connection = store.site }
+                #if targetEnvironment(macCatalyst)
+                .onAppear { sessionTokenActive = TokenVault.hasSessionToken }
+                .onChange(of: token) { _, _ in sessionTokenActive = TokenVault.hasSessionToken }
+                .onChange(of: message) { _, _ in sessionTokenActive = TokenVault.hasSessionToken }
+                #endif
                 .onDisappear { token = "" }
         }
     }
@@ -711,10 +960,10 @@ private struct PublishButtonAppearance: ViewModifier {
                         Button { editing = category } label: {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(category.name).foregroundStyle(WriterPalette.text)
-                                Text(category.id.isEmpty ? "リポジトリ直下" : category.id).font(.caption).foregroundStyle(WriterPalette.secondary)
+                                Text(category.id.isEmpty ? "リポジトリ直下" : category.id).font(.writerCaption).foregroundStyle(WriterPalette.secondary)
                             }.frame(maxWidth: .infinity, alignment: .leading)
                         }.buttonStyle(.borderless)
-                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                        Image(systemName: "chevron.right").font(.writerCaption).foregroundStyle(.tertiary)
                     }
                 }
                 Button {
@@ -739,10 +988,10 @@ private struct PublishButtonAppearance: ViewModifier {
                     }.accessibilityIdentifier("category-default")
                 }
                 Text("カテゴリ名を開くと、記事・画像の保存先、記事形式、項目名を編集できます。変更は新しい記事に使い、保存済みの記事は元の設定を保ちます。")
-                    .font(.caption).foregroundStyle(WriterPalette.secondary)
+                    .font(.writerCaption).foregroundStyle(WriterPalette.secondary)
                 Button("カテゴリ設定を保存") { save() }.disabled(discovering)
                     .accessibilityIdentifier("category-save")
-                if let message { Text(message).font(.caption).foregroundStyle(WriterPalette.secondary) }
+                if let message { Text(message).font(.writerCaption).foregroundStyle(WriterPalette.secondary) }
             }
             Section {
                 ForEach(tags, id: \.self) { tag in
@@ -762,7 +1011,7 @@ private struct PublishButtonAppearance: ViewModifier {
                         .disabled(newTag.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
                 Button("タグ候補を保存") { saveTags() }.accessibilityIdentifier("tag-save")
-                if let tagMessage { Text(tagMessage).font(.caption).foregroundStyle(WriterPalette.secondary) }
+                if let tagMessage { Text(tagMessage).font(.writerCaption).foregroundStyle(WriterPalette.secondary) }
             } header: { Text("タグ · 記事につけるラベル") } footer: {
                 Text("記事作成画面から複数選べる候補です。記事ごとの自由入力もできます。タグを選んでも保存先フォルダは変わりません。候補を削除しても、既存の記事のタグは残ります。")
             }
@@ -838,7 +1087,7 @@ private struct PublishButtonAppearance: ViewModifier {
                     }
                 } header: { Text("画像の保存先") } footer: { Text("公開サイトの構成に合わせて指定します。既存の画像は元の保存先・リンクを保ちます。") }
                 ArticleFormatSettingsEditor(profile: $category.profile) { editingField = $0 }
-                if let message { Section { Text(message).foregroundStyle(.red).font(.caption) } }
+                if let message { Section { Text(message).foregroundStyle(.red).font(.writerCaption) } }
             }.writerCanvas().writerChrome().navigationTitle("カテゴリの設定").navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) { Button("キャンセル") { dismiss() } }
@@ -938,7 +1187,7 @@ private struct PublishButtonAppearance: ViewModifier {
             ForEach(profile.frontMatter.extra.keys.sorted(), id: \.self) { key in
                 if let value = profile.frontMatter.extra[key] {
                     Button { onEditField(ArticleFixedField(originalKey: key, key: key, value: value)) } label: {
-                        HStack { Text(key); Spacer(); Text(value.literal).font(.caption).foregroundStyle(WriterPalette.secondary).lineLimit(1); Image(systemName: "chevron.right").font(.caption) }
+                        HStack { Text(key); Spacer(); Text(value.literal).font(.writerCaption).foregroundStyle(WriterPalette.secondary).lineLimit(1); Image(systemName: "chevron.right").font(.writerCaption) }
                     }
                 }
             }

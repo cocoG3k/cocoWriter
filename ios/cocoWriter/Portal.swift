@@ -10,23 +10,31 @@ import UIKit
     @State private var sharedDraft: Draft?
     @State private var editingSharedDraft: Draft?
     var body: some View {
+        Group {
+        #if targetEnvironment(macCatalyst)
+            MacWorkspaceView(sharedArticle: $editingSharedDraft)
+        #else
         TabView(selection: $tab) {
             ArticleLibraryView().tabItem { Label("記事", systemImage: "doc.text") }.tag(0)
             ArticleAlbumView().tabItem { Label("アルバム", systemImage: "photo.on.rectangle.angled") }.tag(3)
             PrivateNotesView().tabItem { Label("自分のメモ", systemImage: "note.text") }.tag(1)
             SettingsView().tabItem { Label("設定", systemImage: "gearshape") }.tag(2)
         }
+        #endif
+        }
         .safeAreaInset(edge: .top) {
             if let sharedDraft {
                 HStack {
-                    Text("共有した曲から下書きを作成しました").font(.caption)
+                    Text("共有した曲から下書きを作成しました").font(.writerCaption)
                     Spacer()
                     Button("続きを書く") { editingSharedDraft = drafts.drafts.first { $0.id == sharedDraft.id }; self.sharedDraft = nil }
                     Button { self.sharedDraft = nil } label: { Image(systemName: "xmark") }.accessibilityLabel("案内を閉じる")
                 }.padding(12).writerBarBackground()
             }
         }
+        #if !targetEnvironment(macCatalyst)
         .sheet(item: $editingSharedDraft) { draft in NavigationStack { EditorView(draft: draft) } }
+        #endif
         .task { purgeTrash(); receiveMusic() }
         .onChange(of: drafts.drafts) { _, _ in musicLibrary.reconcile(from: drafts) }
         .onChange(of: drafts.storageError) { _, error in if error == nil { musicLibrary.reconcile(from: drafts) } }
@@ -48,6 +56,8 @@ import UIKit
 
 @MainActor struct ArticleLibraryView: View {
     @EnvironmentObject private var store: DraftStore
+    var selectedArticleID: UUID? = nil
+    var onOpenArticle: ((Draft) -> Void)? = nil
     @State private var shelf: ArticleShelf = .drafts
     @AppStorage("article-filter-mode") private var filterMode: ArticleFilterMode = .tags
     @State private var selectedArticleTag: String?
@@ -59,9 +69,11 @@ import UIKit
     @State private var managing = false
     @State private var selection = Set<UUID>()
     @State private var message: String?
+    @State private var search = ""
     private var items: [Draft] {
         ArticleLibrary.items(store.drafts, shelf: shelf, publishedSort: publishedSort)
             .filter { draft in
+                guard search.isEmpty || [draft.title, draft.description, draft.body, draft.tags].contains(where: { $0.localizedStandardContains(search) }) else { return false }
                 switch filterMode {
                 case .categories: return categoryFilter == nil || store.categoryID(for: draft) == categoryFilter
                 case .tags: return selectedArticleTag.map { RepositoryArticleMarkdown.tagValues(draft.tags).contains($0) } ?? true
@@ -92,9 +104,41 @@ import UIKit
         NavigationStack {
             VStack(spacing: 0) {
                 VStack(spacing: 8) {
+                    #if targetEnvironment(macCatalyst)
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass").foregroundStyle(WriterPalette.secondary)
+                        TextField("記事を検索", text: $search,
+                                  prompt: Text("記事を検索").foregroundStyle(WriterPalette.secondary)).textFieldStyle(.plain)
+                            .accessibilityIdentifier("article-search")
+                        if !search.isEmpty {
+                            Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).accessibilityLabel("検索を消去")
+                        }
+                    }.font(.subheadline).padding(.horizontal, 10).padding(.vertical, 9)
+                        .background(WriterPalette.surface, in: RoundedRectangle(cornerRadius: 6))
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(WriterPalette.separator.opacity(0.5), lineWidth: 1))
+                    HStack(spacing: 2) {
+                        ForEach(ArticleShelf.allCases) { value in
+                            Button { shelf = value } label: {
+                                HStack(spacing: 5) {
+                                    Text(value.label).fixedSize()
+                                    Spacer(minLength: 2)
+                                    Text("\(ArticleLibrary.items(store.drafts, shelf: value).count)")
+                                        .foregroundStyle(WriterPalette.secondary).monospacedDigit().fixedSize()
+                                }
+                                .font(.writerCaption.weight(shelf == value ? .semibold : .regular))
+                                .foregroundStyle(shelf == value ? WriterPalette.text : WriterPalette.secondary)
+                                .padding(.horizontal, 10).frame(maxWidth: .infinity, minHeight: 32)
+                                .background(shelf == value ? WriterPalette.selected : Color.clear, in: RoundedRectangle(cornerRadius: 5))
+                                .contentShape(Rectangle())
+                            }.buttonStyle(.plain).accessibilityValue(shelf == value ? "選択中" : "")
+                                .accessibilityAddTraits(shelf == value ? .isSelected : [])
+                        }
+                    }.accessibilityIdentifier("article-shelf")
+                    #else
                     Picker("記事の状態", selection: $shelf) {
                         ForEach(ArticleShelf.allCases) { value in Text("\(value.label) \(ArticleLibrary.items(store.drafts, shelf: value).count)").tag(value) }
                     }.pickerStyle(.segmented).accessibilityIdentifier("article-shelf")
+                    #endif
                     HStack(spacing: 7) {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 7) {
@@ -124,22 +168,34 @@ import UIKit
                             HStack(spacing: 4) {
                                 Label(filterMode.label, systemImage: filterMode == .categories ? "folder" : "tag")
                                 Image(systemName: "chevron.down")
-                            }.font(.caption).fixedSize()
+                            }.font(.writerCaption).fixedSize()
                         }
                         .accessibilityLabel("絞り込み方法・" + filterMode.label)
                         .accessibilityHint("カテゴリまたはタグを選べます")
                         .accessibilityIdentifier("article-filter-mode")
                     }
+                    #if targetEnvironment(macCatalyst)
+                    Button { create() } label: {
+                        Label("記事を書く", systemImage: "square.and.pencil")
+                            .font(.subheadline.weight(.medium)).fixedSize()
+                            .foregroundStyle(WriterPalette.text)
+                            .padding(.horizontal, 10).frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
+                            .background(WriterPalette.surface, in: RoundedRectangle(cornerRadius: 6))
+                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(WriterPalette.separator.opacity(0.5), lineWidth: 1))
+                    }.buttonStyle(.plain).disabled(!store.loaded || managing || syncing)
+                        .accessibilityIdentifier("article-create")
+                    #else
                     Button { create() } label: { Label("記事を書く", systemImage: "square.and.pencil").font(.subheadline).frame(maxWidth: .infinity, minHeight: 28) }
                         .buttonStyle(.bordered).disabled(!store.loaded || managing || syncing)
                         .accessibilityIdentifier("article-create")
+                    #endif
                 }.padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 6)
                 List {
                     Group {
-                        if syncing { HStack { ProgressView(); Text("GitHubの記事を読み込み中…").font(.caption) } }
-                        if let syncError { Text(syncError).font(.caption).foregroundStyle(.red) }
+                        if syncing { HStack { ProgressView(); Text("GitHubの記事を読み込み中…").font(.writerCaption) } }
+                        if let syncError { Text(syncError).font(.writerCaption).foregroundStyle(.red) }
                         if let error = store.storageError {
-                            Text(error).font(.caption).foregroundStyle(.red)
+                            Text(error).font(.writerCaption).foregroundStyle(.red)
                             Button("再保存") { store.persist() }
                         }
                         if items.isEmpty {
@@ -151,31 +207,32 @@ import UIKit
                         ForEach(items) { draft in
                             Button {
                                 if managing { if selection.contains(draft.id) { selection.remove(draft.id) } else if !draft.hasPendingOperation { selection.insert(draft.id) } }
-                                else if draft.pendingDeletionSHA != nil { destination = .deletion(draft.id) }
-                                else { destination = .editor(draft) }
+                                else if draft.pendingDeletionSHA != nil { openDeletion(draft.id) }
+                                else { openArticle(draft) }
                             } label: {
                                 CompactArticleRow(draft: draft, detail: filterLabel(for: draft), selecting: managing, selected: selection.contains(draft.id))
                             }.buttonStyle(.plain).disabled(syncing).listRowInsets(EdgeInsets(top: 7, leading: 16, bottom: 7, trailing: 16))
+                                .listRowBackground(selectedArticleID == draft.id ? WriterPalette.selected : Color.clear)
                                 .accessibilityIdentifier("article-row-" + draft.id.uuidString)
                                 .accessibilityLabel("\(draft.displayTitle)、\(filterLabel(for: draft))、\(draft.pendingMarkdown != nil ? "送信結果の確認待ち" : shelf.label)")
                                 .accessibilityValue(selection.contains(draft.id) ? "選択済み" : "")
                                 .swipeActions(edge: .trailing, allowsFullSwipe: shelf == .drafts) {
                                     if shelf == .published {
-                                        Button(role: .destructive) { destination = .deletion(draft.id) } label: { Label("サイトから削除", systemImage: "trash") }.disabled(managing || syncing)
+                                        Button(role: .destructive) { openDeletion(draft.id) } label: { Label("サイトから削除", systemImage: "trash") }.disabled(managing || syncing)
                                     } else {
                                         Button(role: .destructive) { remove([draft.id]) } label: { Label("ゴミ箱へ", systemImage: "trash") }.disabled(draft.hasPendingOperation || managing)
                                     }
                                 }
                                 .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                                    Button { store.togglePin(draft.id) } label: { Label(draft.pinnedAt == nil ? "ピン留め" : "ピン解除", systemImage: draft.pinnedAt == nil ? "pin" : "pin.slash") }.tint(.teal).disabled(managing)
+                                    Button { store.togglePin(draft.id) } label: { Label(draft.pinnedAt == nil ? "ピン留め" : "ピン解除", systemImage: draft.pinnedAt == nil ? "pin" : "pin.slash") }.tint(.teal).disabled(managing || selectedArticleID == draft.id)
                                 }
                                 .contextMenu {
-                                    Button(draft.pinnedAt == nil ? "ピン留め" : "ピン解除", systemImage: "pin") { store.togglePin(draft.id) }
+                                    Button(draft.pinnedAt == nil ? "ピン留め" : "ピン解除", systemImage: "pin") { store.togglePin(draft.id) }.disabled(selectedArticleID == draft.id)
                                     Button("複製して下書きにする", systemImage: "doc.on.doc") {
-                                        if let copy = store.duplicate(draft.id) { shelf = .drafts; selectedArticleTag = nil; categoryFilter = nil; destination = .editor(copy) }
+                                        if let copy = store.duplicate(draft.id) { shelf = .drafts; selectedArticleTag = nil; categoryFilter = nil; openArticle(copy) }
                                     }.disabled(draft.hasPendingOperation)
                                     if draft.isPublished {
-                                        Button("サイトから削除…", systemImage: "trash", role: .destructive) { destination = .deletion(draft.id) }
+                                        Button("サイトから削除…", systemImage: "trash", role: .destructive) { openDeletion(draft.id) }
                                             .accessibilityIdentifier("delete-published-" + draft.id.uuidString)
                                     }
                                     Button("端末のゴミ箱へ移動", systemImage: "trash", role: .destructive) { remove([draft.id]) }.disabled(draft.hasPendingOperation)
@@ -188,7 +245,14 @@ import UIKit
                     .id(Set(items.map(\.id)))
                     .listStyle(.plain).environment(\.defaultMinListRowHeight, 44)
                     .refreshable { if shelf == .published { await refreshPublished() } }
-                if shelf == .published { Text("GitHubの記事を表示します。下に引くと最新の記事を読み込みます。").font(.caption2).foregroundStyle(WriterPalette.secondary).padding(.horizontal, 16).padding(.vertical, 5) }
+                if shelf == .published {
+                    #if targetEnvironment(macCatalyst)
+                    Text("GitHubの記事を表示します。最新を読むには記事を閉じ、管理メニューから読み込んでください。")
+                        .font(.writerCaption2).foregroundStyle(WriterPalette.secondary).padding(.horizontal, 16).padding(.vertical, 5)
+                    #else
+                    Text("GitHubの記事を表示します。下に引くと最新の記事を読み込みます。").font(.writerCaption2).foregroundStyle(WriterPalette.secondary).padding(.horizontal, 16).padding(.vertical, 5)
+                    #endif
+                }
             }.writerChrome().navigationTitle("記事").navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) { Button(managing ? "完了" : "選択") { managing.toggle(); selection.removeAll() }.disabled(items.isEmpty && !managing) }
@@ -208,7 +272,7 @@ import UIKit
                                 }.accessibilityIdentifier("article-published-sort")
                             }
                             Button("GitHubの記事を読み込む", systemImage: "arrow.clockwise") { Task { await refreshPublished() } }
-                                .disabled(syncing || managing).accessibilityIdentifier("article-sync")
+                                .disabled(syncing || managing || selectedArticleID != nil).accessibilityIdentifier("article-sync")
                             Button("ゴミ箱（\(trashCount)）", systemImage: "trash") { destination = .trash }
                             if managing { Button("表示中を全て選択") { selection = Set(items.filter { !$0.hasPendingOperation }.map(\.id)) } }
                         } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("記事の管理")
@@ -216,11 +280,25 @@ import UIKit
                 }
                 .safeAreaInset(edge: .bottom) {
                     if managing {
+                        #if targetEnvironment(macCatalyst)
+                        ViewThatFits(in: .horizontal) {
+                            HStack {
+                                Text("\(selection.count)件選択").font(.writerCaption).foregroundStyle(WriterPalette.secondary).fixedSize()
+                                Spacer(minLength: 8)
+                                Button("端末のゴミ箱へ移動", role: .destructive) { remove(selection) }.disabled(selection.isEmpty).fixedSize()
+                            }
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("\(selection.count)件選択").font(.writerCaption).foregroundStyle(WriterPalette.secondary)
+                                Button("端末のゴミ箱へ移動", role: .destructive) { remove(selection) }.disabled(selection.isEmpty)
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+                        }.padding(.horizontal, 16).padding(.vertical, 10).writerBarBackground()
+                        #else
                         HStack {
-                            Text("\(selection.count)件選択").font(.caption).foregroundStyle(WriterPalette.secondary)
+                            Text("\(selection.count)件選択").font(.writerCaption).foregroundStyle(WriterPalette.secondary)
                             Spacer()
                             Button("端末のゴミ箱へ移動", role: .destructive) { remove(selection) }.disabled(selection.isEmpty)
                         }.padding(.horizontal, 16).padding(.vertical, 10).writerBarBackground()
+                        #endif
                     }
                 }
                 .onChange(of: shelf) { _, _ in selection.removeAll() }
@@ -241,7 +319,7 @@ import UIKit
     private func refreshPublished() async {
         store.beginRemoteOperation()
         defer { store.endRemoteOperation() }
-        guard !syncing, destination == nil, !managing, store.loaded, store.storageError == nil else { return }
+        guard !syncing, destination == nil, selectedArticleID == nil, !managing, store.loaded, store.storageError == nil else { return }
         if let error = store.categorySettingsError { syncError = error; return }
         syncing = true; syncError = nil
         defer { syncing = false }
@@ -259,9 +337,18 @@ import UIKit
         if let error = store.categorySettingsError { message = error; return }
         let draft = store.newDraft()
         shelf = .drafts; selectedArticleTag = nil; categoryFilter = nil
-        destination = .editor(draft)
+        openArticle(draft)
+    }
+    private func openDeletion(_ id: UUID) {
+        guard selectedArticleID != id else { message = "編集中の記事を閉じてから削除してください。"; return }
+        destination = .deletion(id)
+    }
+    private func openArticle(_ draft: Draft) {
+        if let onOpenArticle { onOpenArticle(draft) }
+        else { destination = .editor(draft) }
     }
     private func remove(_ ids: Set<UUID>) {
+        guard !ids.contains(where: { $0 == selectedArticleID }) else { message = "編集中の記事を閉じてから移動してください。"; return }
         if store.moveToTrash(ids) { selection.subtract(ids) }
         else { message = store.storageError ?? "公開・削除結果の確認待ちの記事は、確認が終わるまで移動できません。" }
     }
@@ -290,12 +377,35 @@ private struct CompactArticleRow: View {
     var selecting = false
     var selected = false
     var body: some View {
+        #if targetEnvironment(macCatalyst)
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: selecting ? (selected ? "checkmark.circle.fill" : "circle") : draft.containsMusic ? "music.note" : "doc.text")
+                .font(.subheadline).foregroundStyle(WriterPalette.secondary).frame(width: 20).padding(.top, 2)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(alignment: .top, spacing: 5) {
+                    Text(draft.displayTitle).font(.subheadline.weight(.medium)).foregroundStyle(WriterPalette.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if draft.pinnedAt != nil { Image(systemName: "pin.fill").font(.writerCaption2).foregroundStyle(WriterPalette.secondary) }
+                }
+                Text(detail).font(.writerCaption2).foregroundStyle(WriterPalette.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 6) {
+                    Text(draft.isPublished ? draft.date : draft.updatedAt, format: .dateTime.month().day()).fixedSize()
+                    if draft.pendingMarkdown != nil { Text("結果確認待ち").foregroundStyle(.orange) }
+                    else if draft.pendingDeletionSHA != nil { Text("削除確認待ち").foregroundStyle(.orange) }
+                    else if draft.remoteChanged == true { Text("GitHubに変更あり").foregroundStyle(.orange) }
+                    else if draft.isPublished && draft.hasUnpublishedEdits { Text("編集中").foregroundStyle(.orange) }
+                }.font(.writerCaption2).foregroundStyle(WriterPalette.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }.frame(maxWidth: .infinity, alignment: .leading)
+        }.frame(maxWidth: .infinity, minHeight: 42, alignment: .leading).contentShape(Rectangle())
+        #else
         HStack(spacing: 10) {
             Image(systemName: selecting ? (selected ? "checkmark.circle.fill" : "circle") : draft.containsMusic ? "music.note" : "doc.text").foregroundStyle(Color.accentColor).font(.body).frame(width: 22)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {
                     Text(draft.displayTitle).font(.subheadline.weight(.medium)).foregroundStyle(WriterPalette.text).lineLimit(1)
-                    if draft.pinnedAt != nil { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(WriterPalette.secondary) }
+                    if draft.pinnedAt != nil { Image(systemName: "pin.fill").font(.writerCaption2).foregroundStyle(WriterPalette.secondary) }
                 }
                 HStack(spacing: 6) {
                     Text(detail).lineLimit(1)
@@ -304,11 +414,12 @@ private struct CompactArticleRow: View {
                     else if draft.pendingDeletionSHA != nil { Text("削除確認待ち").foregroundStyle(.orange) }
                     else if draft.remoteChanged == true { Text("GitHubに変更あり").foregroundStyle(.orange) }
                     else if draft.isPublished && draft.hasUnpublishedEdits { Text("編集中").foregroundStyle(.orange) }
-                }.font(.caption2).foregroundStyle(WriterPalette.secondary)
+                }.font(.writerCaption2).foregroundStyle(WriterPalette.secondary)
             }
             Spacer(minLength: 2)
-            if !selecting { Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary) }
+            if !selecting { Image(systemName: "chevron.right").font(.writerCaption2).foregroundStyle(.tertiary) }
         }.frame(minHeight: 36).contentShape(Rectangle())
+        #endif
     }
 }
 
@@ -330,7 +441,7 @@ private struct CompactArticleRow: View {
                         if completed {
                             Section {
                                 Text("GitHubからの削除を確認しました。本文は端末の下書きに残っています。")
-                                Text("サイトから消えるのは、公開処理が終わってからです。").font(.caption).foregroundStyle(WriterPalette.secondary)
+                                Text("サイトから消えるのは、公開処理が終わってからです。").font(.writerCaption).foregroundStyle(WriterPalette.secondary)
                                 if let url = store.site.websiteURL { Link("公開サイトで確認", destination: url) }
                                 if let url = store.site.actionsURL { Link("サイトへの反映状況を確認", destination: url) }
                             }
@@ -349,7 +460,7 @@ private struct CompactArticleRow: View {
                                 }
                             } footer: { Text("確認待ちの場合は、GitHubの記事を照合してから再試行します。") }
                         }
-                        if let message { Section { Text(message).font(.caption) } }
+                        if let message { Section { Text(message).font(.writerCaption) } }
                         if let error = store.storageError { Section { Text(error).foregroundStyle(.red); Button("再保存") { store.persist() } } }
                     } else { Text("記事が見つかりません。") }
                 }.listRowBackground(WriterPalette.surface)
@@ -404,8 +515,8 @@ private struct CompactArticleRow: View {
         NavigationStack {
             List {
                 Group {
-                    Section { Text("端末内のゴミ箱です。復元すると元のタブに戻ります。投稿済みの記事を端末から削除しても、公開サイトの記事は残ります。").font(.caption).foregroundStyle(WriterPalette.secondary) }
-                    if let error = store.storageError { Text(error).font(.caption).foregroundStyle(.red); Button("再保存") { store.persist() } }
+                    Section { Text("端末内のゴミ箱です。復元すると元のタブに戻ります。投稿済みの記事を端末から削除しても、公開サイトの記事は残ります。").font(.writerCaption).foregroundStyle(WriterPalette.secondary) }
+                    if let error = store.storageError { Text(error).font(.writerCaption).foregroundStyle(.red); Button("再保存") { store.persist() } }
                     if items.isEmpty { Text("ゴミ箱は空です").foregroundStyle(WriterPalette.secondary) }
                     ForEach(items) { draft in
                         VStack(alignment: .leading, spacing: 5) {
@@ -414,7 +525,7 @@ private struct CompactArticleRow: View {
                                 Button("復元") { store.restore(draft.id) }.accessibilityIdentifier("restore-article-" + draft.id.uuidString)
                                 Spacer()
                                 Button("完全に削除", role: .destructive) { deleting = draft }.accessibilityIdentifier("delete-article-" + draft.id.uuidString)
-                            }.font(.caption).buttonStyle(.borderless).frame(minHeight: 32)
+                            }.font(.writerCaption).buttonStyle(.borderless).frame(minHeight: 32)
                         }.padding(.vertical, 2)
                     }
                 }.listRowBackground(WriterPalette.surface)
@@ -469,14 +580,14 @@ private struct CompactArticleRow: View {
                     List {
                         Group {
                             if let error = store.storageError {
-                                Text(error).font(.caption).foregroundStyle(.red)
+                                Text(error).font(.writerCaption).foregroundStyle(.red)
                                 Button("再保存") { store.persist() }
                             }
-                            if let error = store.tagStorageError { Text(error).font(.caption).foregroundStyle(.red) }
+                            if let error = store.tagStorageError { Text(error).font(.writerCaption).foregroundStyle(.red) }
                             if items.isEmpty {
                                 VStack(spacing: 6) {
                                     Text(tasksOnly ? "TODOの記録はまだありません" : (searching || selectedTag != nil ? "メモが見つかりません" : "この日のメモはまだありません"))
-                                    if !browsingAll { Text("下の入力欄から、今日のメモを書けます。").font(.caption) }
+                                    if !browsingAll { Text("下の入力欄から、今日のメモを書けます。").font(.writerCaption) }
                                 }.font(.subheadline).foregroundStyle(WriterPalette.secondary).frame(maxWidth: .infinity)
                                     .padding(.vertical, 28).listRowSeparator(.hidden).listRowBackground(Color.clear)
                             }
@@ -501,6 +612,9 @@ private struct CompactArticleRow: View {
                             }
                         }
                 }
+                #if targetEnvironment(macCatalyst)
+                composerBar
+                #endif
             }.background(WriterPalette.background)
                 .writerChrome().navigationTitle(title).navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -529,7 +643,7 @@ private struct CompactArticleRow: View {
                         Button { tasksOpen = true } label: {
                             HStack(spacing: 3) {
                                 Image(systemName: "checklist")
-                                Text("\(PrivateNoteTimeline.pendingTasks(store.notes).count)").font(.caption).monospacedDigit()
+                                Text("\(PrivateNoteTimeline.pendingTasks(store.notes).count)").font(.writerCaption).monospacedDigit()
                             }
                         }.accessibilityLabel("未完了のTODO一覧").accessibilityIdentifier("note-open-tasks")
                         if browsingAll || !Calendar.current.isDateInToday(selectedDay) {
@@ -540,27 +654,9 @@ private struct CompactArticleRow: View {
                             .accessibilityLabel("日付を選ぶ").accessibilityIdentifier("note-calendar")
                     }
                 }
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    if managing {
-                        HStack {
-                            Menu("\(selection.count)件選択") { Button("表示中を全て選択") { selection = Set(items.map { $0.note.id }) } }
-                            Spacer()
-                            Button("ゴミ箱へ移動", role: .destructive) { if store.moveToTrash(selection) { selection.removeAll() } }.disabled(selection.isEmpty)
-                        }.font(.subheadline).padding(.horizontal, 16).padding(.vertical, 12).writerBarBackground()
-                    } else {
-                        QuickNoteComposer(text: $draftText, isTask: $draftIsTask, dueDate: draftDueDate, tags: tags, enabled: store.loaded,
-                                          selectedTag: selectedTag, manageTags: { managingTags = true }, hideTag: { store.hideTag($0) }) {
-                            let body = selectedTag.map { NoteTags.appending($0, to: draftText) } ?? draftText
-                            let now = Date()
-                            guard store.addEntry(body: body, date: now, task: draftIsTask ? NoteTask(dueDate: draftDueDate.wrappedValue) : nil) else { return false }
-                            scrollTarget = store.notes.first?.id.uuidString
-                            selectedDay = Calendar.current.startOfDay(for: now)
-                            browsingAll = false; selectedTag = nil; query = ""; searching = false; filter = nil; tasksOnly = false
-                            draftText = ""; draftIsTask = false; draftDeadline = 0; savedCount += 1
-                            return true
-                        }
-                    }
-                }
+                #if !targetEnvironment(macCatalyst)
+                .safeAreaInset(edge: .bottom, spacing: 0) { composerBar }
+                #endif
                 .sensoryFeedback(.success, trigger: savedCount)
                 .onChange(of: filter) { _, _ in selection.removeAll() }
                 .onChange(of: selectedTag) { _, _ in selection.removeAll() }
@@ -587,6 +683,28 @@ private struct CompactArticleRow: View {
                             .toolbar { Button("完了") { browsingAll = false; selectedTag = nil; query = ""; searching = false; tasksOnly = false; calendarOpen = false } }
                     }.presentationDetents([.height(420)]).presentationDragIndicator(.visible)
                 }
+        }
+    }
+
+    @ViewBuilder private var composerBar: some View {
+        if managing {
+            HStack {
+                Menu("\(selection.count)件選択") { Button("表示中を全て選択") { selection = Set(items.map { $0.note.id }) } }
+                Spacer()
+                Button("ゴミ箱へ移動", role: .destructive) { if store.moveToTrash(selection) { selection.removeAll() } }.disabled(selection.isEmpty)
+            }.font(.subheadline).padding(.horizontal, 16).padding(.vertical, 12).writerBarBackground()
+        } else {
+            QuickNoteComposer(text: $draftText, isTask: $draftIsTask, dueDate: draftDueDate, tags: tags, enabled: store.loaded,
+                              selectedTag: selectedTag, manageTags: { managingTags = true }, hideTag: { store.hideTag($0) }) {
+                let body = selectedTag.map { NoteTags.appending($0, to: draftText) } ?? draftText
+                let now = Date()
+                guard store.addEntry(body: body, date: now, task: draftIsTask ? NoteTask(dueDate: draftDueDate.wrappedValue) : nil) else { return false }
+                scrollTarget = store.notes.first?.id.uuidString
+                selectedDay = Calendar.current.startOfDay(for: now)
+                browsingAll = false; selectedTag = nil; query = ""; searching = false; filter = nil; tasksOnly = false
+                draftText = ""; draftIsTask = false; draftDeadline = 0; savedCount += 1
+                return true
+            }
         }
     }
 
@@ -618,7 +736,7 @@ private struct CompactArticleRow: View {
                 }.padding(.vertical, 8)
             } else {
                 HStack(spacing: 0) {
-                    Button { moveDay(-7) } label: { Image(systemName: "chevron.left").font(.caption).frame(width: 28, height: 48) }
+                    Button { moveDay(-7) } label: { Image(systemName: "chevron.left").font(.writerCaption).frame(width: 28, height: 48) }
                         .accessibilityLabel("前の週")
                     ForEach(PrivateNoteTimeline.week(containing: selectedDay), id: \.self) { day in
                         let active = Calendar.current.isDate(day, inSameDayAs: selectedDay)
@@ -628,7 +746,7 @@ private struct CompactArticleRow: View {
                         }
                         Button { selectedDay = day } label: {
                             VStack(spacing: 4) {
-                                Text(day, format: .dateTime.weekday(.narrow)).font(.system(size: 10)).foregroundStyle(WriterPalette.secondary)
+                                Text(day, format: .dateTime.weekday(.narrow)).font(.writerSmall(size: 10)).foregroundStyle(WriterPalette.secondary)
                                 Text(String(Calendar.current.component(.day, from: day))).font(.subheadline.weight(active ? .semibold : .regular))
                                     .foregroundStyle(active ? WriterPalette.selectedText : WriterPalette.text)
                                     .frame(width: 30, height: 30).background(active ? WriterPalette.selected : Color.clear, in: Circle())
@@ -638,11 +756,11 @@ private struct CompactArticleRow: View {
                             .accessibilityLabel(day.formatted(date: .complete, time: .omitted)).accessibilityValue(active ? "選択中" : "")
                             .accessibilityIdentifier("note-day-" + dayIdentifier(day))
                     }
-                    Button { moveDay(7) } label: { Image(systemName: "chevron.right").font(.caption).frame(width: 28, height: 48) }
+                    Button { moveDay(7) } label: { Image(systemName: "chevron.right").font(.writerCaption).frame(width: 28, height: 48) }
                         .accessibilityLabel("次の週")
                 }.padding(.horizontal, 4).environment(\.locale, Locale(identifier: "ja_JP"))
             }
-            if let filter { Button("\(filter.label)のみ · 解除") { self.filter = nil }.font(.caption).padding(.bottom, 5) }
+            if let filter { Button("\(filter.label)のみ · 解除") { self.filter = nil }.font(.writerCaption).padding(.bottom, 5) }
             Divider().opacity(0.35)
         }
     }
@@ -656,6 +774,14 @@ private struct CompactArticleRow: View {
         }.buttonStyle(.plain).accessibilityValue(active ? "選択中" : "")
     }
 
+    private var timelineTimeWidth: CGFloat {
+        #if targetEnvironment(macCatalyst)
+        52
+        #else
+        36
+        #endif
+    }
+
     private func timelineRow(_ event: NoteTimelineEvent) -> some View {
         let note = event.note
         return HStack(alignment: .top, spacing: 8) {
@@ -663,9 +789,9 @@ private struct CompactArticleRow: View {
                 Image(systemName: selection.contains(note.id) ? "checkmark.circle.fill" : "circle").foregroundStyle(Color.accentColor).frame(width: 24).padding(.top, 8)
             } else if !browsingAll {
                 VStack(spacing: 4) {
-                    Text(event.date, format: .dateTime.hour().minute()).font(.system(size: 10)).monospacedDigit()
-                    if note.pinnedAt != nil { Image(systemName: "pin.fill").font(.system(size: 8)) }
-                }.foregroundStyle(WriterPalette.secondary).frame(width: 36, alignment: .trailing).padding(.top, 10)
+                    Text(event.date, format: .dateTime.hour().minute()).font(.writerSmall(size: 10)).monospacedDigit()
+                    if note.pinnedAt != nil { Image(systemName: "pin.fill").font(.writerSmall(size: 8)) }
+                }.foregroundStyle(WriterPalette.secondary).frame(width: timelineTimeWidth, alignment: .trailing).padding(.top, 10)
             }
             Group {
                 if managing {
@@ -702,7 +828,7 @@ private struct CompactArticleRow: View {
                         if !managing {
                             NoteTaskCheckButton(note: note) { store.toggleTask(note.id) }
                         }
-                        Text(isCompletion ? "TODOを完了" : "TODO").font(.caption.weight(.medium)).foregroundStyle(WriterPalette.secondary)
+                        Text(isCompletion ? "TODOを完了" : "TODO").font(.writerCaption.weight(.medium)).foregroundStyle(WriterPalette.secondary)
                         Spacer(minLength: 4)
                         Button { selected = note } label: { Image(systemName: "ellipsis").frame(width: 28, height: 28) }
                             .buttonStyle(.borderless).foregroundStyle(WriterPalette.secondary).accessibilityLabel("TODOを編集")
@@ -719,7 +845,7 @@ private struct CompactArticleRow: View {
                     .accessibilityIdentifier("note-display-body-" + note.id.uuidString)
                 if !note.tags.isEmpty {
                     Text(verbatim: note.tags.map { "#" + $0 }.joined(separator: "  "))
-                        .font(.system(size: 11)).foregroundStyle(WriterPalette.secondary).lineSpacing(2)
+                        .font(.writerSmall(size: 11)).foregroundStyle(WriterPalette.secondary).lineSpacing(2)
                         .fixedSize(horizontal: false, vertical: true).padding(.top, 2)
                         .accessibilityIdentifier("note-display-tags-" + note.id.uuidString)
                 }
@@ -729,7 +855,7 @@ private struct CompactArticleRow: View {
                 HStack(spacing: 4) {
                     Text(note.date, format: .dateTime.year().month().day().hour().minute())
                     if note.pinnedAt != nil { Image(systemName: "pin.fill") }
-                }.font(.system(size: 10)).foregroundStyle(WriterPalette.secondary).padding(.horizontal, 11)
+                }.font(.writerSmall(size: 10)).foregroundStyle(WriterPalette.secondary).padding(.horizontal, 11)
             }
         }.contentShape(Rectangle())
     }
@@ -760,7 +886,7 @@ private struct NoteTagSuggestions: View {
                 ForEach(tags, id: \.self) { tag in
                     let added = NoteTags.extract(from: text).contains { NoteTags.key($0) == NoteTags.key(tag) }
                     Button { text = NoteTags.appending(tag, to: text) } label: {
-                        Text("#" + tag).font(.caption).padding(.horizontal, 10).frame(minHeight: 32)
+                        Text("#" + tag).font(.writerCaption).padding(.horizontal, 10).frame(minHeight: 32)
                             .background(Color.accentColor.opacity(added ? 0.16 : 0.06), in: Capsule())
                     }.buttonStyle(.plain).foregroundStyle(Color.accentColor).disabled(added)
                         .accessibilityLabel("#\(tag)を追加").accessibilityValue(added ? "追加済み" : "")
@@ -810,7 +936,7 @@ private struct NoteTaskStatus: View {
                 } icon: { Image(systemName: "checkmark") }
                 .foregroundStyle(WriterPalette.secondary)
             }
-        }.font(.caption)
+        }.font(.writerCaption)
     }
 }
 
@@ -830,7 +956,7 @@ private struct NoteTaskDeadlinePicker: View {
                 } icon: { Image(systemName: "calendar") }
                 .padding(.horizontal, 10).frame(minHeight: 36).background(WriterPalette.selected, in: Capsule())
             }.buttonStyle(.borderless).accessibilityLabel("締め切りを選ぶ").accessibilityIdentifier("note-task-deadline")
-        }.font(.caption).foregroundStyle(WriterPalette.text)
+        }.font(.writerCaption).foregroundStyle(WriterPalette.text)
             .sheet(isPresented: $calendarOpen) {
                 NavigationStack {
                     VStack(spacing: 8) {
@@ -907,12 +1033,12 @@ private struct NoteTaskCalendar: UIViewRepresentable {
     var body: some View {
         NavigationStack {
             List {
-                if let error = store.storageError { Text(error).font(.caption).foregroundStyle(.red) }
+                if let error = store.storageError { Text(error).font(.writerCaption).foregroundStyle(.red) }
                 if tasks.isEmpty {
                     VStack(spacing: 10) {
                         Image(systemName: "checkmark.circle").font(.largeTitle)
                         Text("未完了のTODOはありません")
-                        Text("メモ入力欄のチェックボタンから追加できます。").font(.caption)
+                        Text("メモ入力欄のチェックボタンから追加できます。").font(.writerCaption)
                     }.foregroundStyle(WriterPalette.secondary).frame(maxWidth: .infinity).padding(.vertical, 36)
                         .listRowBackground(Color.clear)
                 }
@@ -927,7 +1053,7 @@ private struct NoteTaskCalendar: UIViewRepresentable {
                     VStack(spacing: 12) {
                         if let lastCompleted, store.notes.first(where: { $0.id == lastCompleted })?.task?.isCompleted == true {
                             HStack {
-                                Text("完了しました。記録に残っています。").font(.caption)
+                                Text("完了しました。記録に残っています。").font(.writerCaption)
                                 Spacer()
                                 Button("戻す") { if store.toggleTask(lastCompleted) { self.lastCompleted = nil } }.font(.subheadline)
                             }
@@ -955,7 +1081,7 @@ private struct NoteTaskCalendar: UIViewRepresentable {
                                     .foregroundStyle(WriterPalette.text)
                                 if let task = note.task { NoteTaskStatus(task: task) }
                                 if !note.tags.isEmpty {
-                                    Text(verbatim: note.tags.map { "#" + $0 }.joined(separator: "  ")).font(.caption).foregroundStyle(WriterPalette.secondary)
+                                    Text(verbatim: note.tags.map { "#" + $0 }.joined(separator: "  ")).font(.writerCaption).foregroundStyle(WriterPalette.secondary)
                                 }
                             }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 9).contentShape(Rectangle())
                         }.buttonStyle(.borderless).accessibilityLabel("TODOを編集: " + note.displayTitle)
@@ -984,7 +1110,7 @@ private struct QuickNoteComposer: View {
             Divider().opacity(0.35)
             if isTask {
                 HStack(spacing: 8) {
-                    Text("締め切り").font(.caption).foregroundStyle(WriterPalette.secondary)
+                    Text("締め切り").font(.writerCaption).foregroundStyle(WriterPalette.secondary)
                     NoteTaskDeadlinePicker(date: $dueDate)
                     Spacer(minLength: 0)
                 }.padding(.horizontal, 12).padding(.top, 8)
@@ -1005,7 +1131,7 @@ private struct QuickNoteComposer: View {
                 }.buttonStyle(.plain).foregroundStyle(WriterPalette.secondary).accessibilityLabel("#を入力").accessibilityIdentifier("quick-note-hash")
                 VStack(alignment: .leading, spacing: 2) {
                     Text((isTask ? "今日のTODO" : "今日のメモ") + (selectedTag.map { " #" + $0 } ?? ""))
-                        .font(.system(size: 10)).foregroundStyle(WriterPalette.secondary)
+                        .font(.writerSmall(size: 10)).foregroundStyle(WriterPalette.secondary)
                     if #available(iOS 18.0, *) {
                         NoteComposerField(text: $text, placeholder: isTask ? "やることを書く…" : "ひとこと書く…", markerRequest: markerRequest, writing: $writing)
                     } else {
@@ -1061,8 +1187,8 @@ private struct NoteComposerField: View {
                     Section {
                         Text("入力候補と絞り込み一覧で同じ順番を使います。右のつまみを上下に動かすと並び替えられます。")
                         Text("一覧から削除しても、メモ本文の #タグは残ります。下から戻すか、新しいメモに同じタグを書いて残すと再び表示されます。")
-                    }.font(.caption).foregroundStyle(WriterPalette.secondary)
-                    if let error = store.tagStorageError { Text(error).font(.caption).foregroundStyle(.red) }
+                    }.font(.writerCaption).foregroundStyle(WriterPalette.secondary)
+                    if let error = store.tagStorageError { Text(error).font(.writerCaption).foregroundStyle(.red) }
                     Section("候補・絞り込み一覧") {
                         if store.tags.isEmpty { Text("タグはありません。#タグを書いてメモを残すと追加されます。").foregroundStyle(WriterPalette.secondary) }
                         ForEach(store.tags, id: \.self) { tag in
@@ -1100,8 +1226,8 @@ private struct NoteComposerField: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    if let error = store.storageError { Text(error).font(.caption).foregroundStyle(.red); Button("再保存") { store.update(note) } }
-                    Text(note.date, format: .dateTime.year().month().day().hour().minute()).font(.caption).foregroundStyle(WriterPalette.secondary)
+                    if let error = store.storageError { Text(error).font(.writerCaption).foregroundStyle(.red); Button("再保存") { store.update(note) } }
+                    Text(note.date, format: .dateTime.year().month().day().hour().minute()).font(.writerCaption).foregroundStyle(WriterPalette.secondary)
                     TextField("ふと思ったことを書いてみよう", text: $note.body, axis: .vertical)
                         .lineLimit(3...24).font(.subheadline).lineSpacing(2).accessibilityIdentifier("private-note-body")
                         .padding(.vertical, 8)
@@ -1113,10 +1239,10 @@ private struct NoteComposerField: View {
                         NoteTaskDeadlinePicker(date: Binding(get: { note.task?.dueDate }, set: { note.task?.dueDate = $0 }))
                         HStack {
                             NoteTaskCheckButton(note: note) { note.task?.completedAt = task.isCompleted ? nil : Date() }
-                            Text(task.isCompleted ? "完了 · タップで未完了に戻す" : "未完了 · タップで完了にする").font(.caption).foregroundStyle(WriterPalette.secondary)
+                            Text(task.isCompleted ? "完了 · タップで未完了に戻す" : "未完了 · タップで完了にする").font(.writerCaption).foregroundStyle(WriterPalette.secondary)
                         }
                         if task.isCompleted { NoteTaskStatus(task: task) }
-                        Text("完了しても、このメモと締め切りは日記に残ります。").font(.caption).foregroundStyle(WriterPalette.secondary)
+                        Text("完了しても、このメモと締め切りは日記に残ります。").font(.writerCaption).foregroundStyle(WriterPalette.secondary)
                     }
                     DisclosureGroup("日付・タイトル") {
                         VStack(alignment: .leading, spacing: 14) {
@@ -1125,7 +1251,7 @@ private struct NoteComposerField: View {
                             Picker("記録の種類", selection: $note.kind) { ForEach(NoteKind.allCases) { kind in Text(kind.label).tag(kind) } }
                         }.padding(.top, 12)
                     }.font(.subheadline)
-                    Label("この端末に自動保存", systemImage: "lock").font(.caption).foregroundStyle(WriterPalette.secondary)
+                    Label("この端末に自動保存", systemImage: "lock").font(.writerCaption).foregroundStyle(WriterPalette.secondary)
                 }.padding(16)
             }.background(WriterPalette.background).scrollDismissesKeyboard(.interactively)
                 .writerChrome().navigationTitle("ひとことを編集").navigationBarTitleDisplayMode(.inline)
@@ -1148,12 +1274,12 @@ private struct NoteComposerField: View {
         NavigationStack {
             List {
                 Group {
-                    if let error = store.storageError { Text(error).font(.caption).foregroundStyle(.red); Button("再保存") { store.persist() } }
+                    if let error = store.storageError { Text(error).font(.writerCaption).foregroundStyle(.red); Button("再保存") { store.persist() } }
                     if store.trash.isEmpty { Text("ゴミ箱は空です").foregroundStyle(WriterPalette.secondary) }
                     ForEach(store.trash) { note in
                         VStack(alignment: .leading, spacing: 4) {
                             Text(note.displayTitle).font(.subheadline.weight(.medium))
-                            HStack { Button("復元") { store.restore(note.id) }.accessibilityIdentifier("restore-note-" + note.id.uuidString); Spacer(); Button("完全に削除", role: .destructive) { deleting = note }.accessibilityIdentifier("delete-note-" + note.id.uuidString) }.font(.caption).buttonStyle(.borderless).frame(minHeight: 32)
+                            HStack { Button("復元") { store.restore(note.id) }.accessibilityIdentifier("restore-note-" + note.id.uuidString); Spacer(); Button("完全に削除", role: .destructive) { deleting = note }.accessibilityIdentifier("delete-note-" + note.id.uuidString) }.font(.writerCaption).buttonStyle(.borderless).frame(minHeight: 32)
                         }
                     }
                 }.listRowBackground(WriterPalette.surface)
@@ -1167,5 +1293,14 @@ private struct NoteComposerField: View {
 }
 
 private func filterButton(_ title: String, active: Bool, action: @escaping () -> Void) -> some View {
-    Button(action: action) { Text(title).font(.caption.weight(active ? .semibold : .regular)).padding(.horizontal, 13).frame(minHeight: 34).foregroundStyle(active ? WriterPalette.onAccent : WriterPalette.text).background(active ? Color.accentColor : WriterPalette.inactiveFilter, in: Capsule()) }.buttonStyle(.plain).accessibilityValue(active ? "選択中" : "")
+    #if targetEnvironment(macCatalyst)
+    Button(action: action) {
+        Text(title).font(.writerCaption.weight(active ? .semibold : .regular)).fixedSize()
+            .foregroundStyle(active ? WriterPalette.text : WriterPalette.secondary)
+            .padding(.horizontal, 9).frame(minHeight: 29)
+            .background(active ? WriterPalette.selected : Color.clear, in: RoundedRectangle(cornerRadius: 5))
+    }.buttonStyle(.plain).accessibilityValue(active ? "選択中" : "")
+    #else
+    Button(action: action) { Text(title).font(.writerCaption.weight(active ? .semibold : .regular)).padding(.horizontal, 13).frame(minHeight: 34).foregroundStyle(active ? WriterPalette.onAccent : WriterPalette.text).background(active ? Color.accentColor : WriterPalette.inactiveFilter, in: Capsule()) }.buttonStyle(.plain).accessibilityValue(active ? "選択中" : "")
+    #endif
 }
